@@ -17,3 +17,43 @@ class Profile(models.Model):
 
     def __str__(self):
         return f"Profile of {self.user.email}"
+
+
+
+
+class Appointment(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('confirmed', 'Confirmed'),
+        ('cancelled', 'Cancelled'),
+        ('completed', 'Completed'),
+    ]
+
+    patient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='patient_appointments',
+        limit_choices_to={'role__name': 'patient'}
+    )
+    doctor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='doctor_appointments',
+        limit_choices_to={'role__name': 'doctor'}
+    )
+    appointment_date = models.DateTimeField()
+    reason = models.TextField()
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-appointment_date']
+        unique_together = ['doctor', 'appointment_date']
+
+    def __str__(self):
+        return f"Appointment #{self.id} - {self.patient} with Dr. {self.doctor}"
