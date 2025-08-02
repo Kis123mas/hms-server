@@ -57,7 +57,6 @@ def get_patients(request):
 
 
 
-
 @api_view(['POST'])
 @authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
@@ -354,7 +353,6 @@ def patient_book_appointment(request):
 
 
 
-
 @api_view(['GET'])
 @authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
@@ -406,7 +404,6 @@ def doctor_appointments(request):
         'count': appointments.count(),
         'appointments': serializer.data
     })
-
 
 
 
@@ -487,7 +484,6 @@ def doctor_update_status(request, appointment_id):
 
 
 
-
 @api_view(['GET'])
 @authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
@@ -504,3 +500,476 @@ def get_my_profile(request):
         'status': 'success',
         'user': serializer.data
     })
+
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_patient_emr(request, patient_id=None):
+    """
+    Get EMR for authenticated patient or specific patient if requested by doctor
+    Requires authentication via Token
+    """
+    try:
+        # Check if user is a patient requesting their own EMR
+        if request.user.role.name == 'patient':
+            if patient_id and str(request.user.id) != str(patient_id):
+                return Response(
+                    {"error": "You can only view your own EMR"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            try:
+                emr = PatientEMR.objects.get(patient=request.user)
+                serializer = PatientEMRSerializer(emr)
+                return Response({
+                    'status': 'success',
+                    'emr': serializer.data
+                }, status=status.HTTP_200_OK)
+            
+            except PatientEMR.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': 'EMR not found for this patient'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if user is a doctor requesting a patient's EMR
+        elif request.user.role.name == 'doctor':
+            if not patient_id:
+                return Response(
+                    {"error": "Doctor must specify a patient ID"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                patient_group = Group.objects.get(name='patient')
+                patient = request.user.__class__.objects.get(
+                    id=patient_id,
+                    role=patient_group,
+                    is_active=True
+                )
+                emr = PatientEMR.objects.get(patient=patient)
+                serializer = PatientEMRSerializer(emr)
+                return Response({
+                    'status': 'success',
+                    'emr': serializer.data
+                }, status=status.HTTP_200_OK)
+            
+            except PatientEMR.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': 'EMR not found for the specified patient'
+                }, status=status.HTTP_404_NOT_FOUND)
+            except request.user.__class__.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': 'Patient not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        # For other roles (admin, staff, etc.)
+        else:
+            if not patient_id:
+                return Response(
+                    {"error": "Please specify a patient ID"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                emr = PatientEMR.objects.get(patient_id=patient_id)
+                serializer = PatientEMRSerializer(emr)
+                return Response({
+                    'status': 'success',
+                    'emr': serializer.data
+                }, status=status.HTTP_200_OK)
+            
+            except PatientEMR.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': 'EMR not found for the specified patient'
+                }, status=status.HTTP_404_NOT_FOUND)
+    
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def create_patient_emr(request):
+    """
+    Create a new EMR record for a patient
+    Only doctors can create EMR records
+    """
+    try:
+        # Verify the requesting user is a doctor
+        if request.user.role.name != 'doctor':
+            return Response(
+                {"error": "Only doctors can create EMR records"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = CreatePatientEMRSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            # Save the EMR record
+            emr = serializer.save()
+            
+            # Return the created EMR data
+            response_serializer = PatientEMRSerializer(emr)
+            return Response({
+                'status': 'success',
+                'message': 'EMR created successfully',
+                'emr': response_serializer.data
+            }, status=status.HTTP_201_CREATED)
+        
+        return Response({
+            'status': 'error',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def update_patient_emr(request, patient_id):
+    """
+    Update a patient's EMR record
+    Only doctors can update EMR records
+    """
+    try:
+        # Verify the requesting user is a doctor
+        if request.user.role.name != 'doctor':
+            return Response(
+                {"error": "Only doctors can update EMR records"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get the patient's EMR record
+        try:
+            patient = APPLICATIONS_USER_MODEL.objects.get(
+                id=patient_id,
+                role__name='patient',
+                is_active=True
+            )
+            emr = PatientEMR.objects.get(patient=patient)
+        except APPLICATIONS_USER_MODEL.DoesNotExist:
+            return Response(
+                {"error": "Patient not found or is not active"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except PatientEMR.DoesNotExist:
+            return Response(
+                {"error": "EMR record not found for this patient"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = UpdatePatientEMRSerializer(
+            emr, 
+            data=request.data, 
+            partial=True
+        )
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                'status': 'success',
+                'message': 'EMR updated successfully',
+                'emr': PatientEMRSerializer(emr).data
+            }, status=status.HTTP_200_OK)
+        
+        return Response({
+            'status': 'error',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def create_patient_vital(request):
+    """
+    Create new patient vital signs record
+    Allowed for: doctors, nurses, and staff (except patients)
+    """
+    try:
+        # Block patients from creating vitals
+        if request.user.role.name == 'patient':
+            return Response(
+                {"error": "Patients cannot create vital records"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = PatientVitalSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+        
+        if serializer.is_valid():
+            # Automatically set recorded_by to current user
+            vital = serializer.save(recorded_by=request.user)
+            
+            return Response({
+                'status': 'success',
+                'message': 'Vital signs recorded successfully',
+                'data': PatientVitalSerializer(vital).data
+            }, status=status.HTTP_201_CREATED)
+        
+        return Response({
+            'status': 'error',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def update_patient_vital(request, vital_id):
+    """
+    Update existing patient vital signs
+    Allowed for:
+    - Original recorder (doctor/nurse who created it)
+    - Admin users
+    """
+    try:
+        # Get the vital record
+        try:
+            vital = PatientVital.objects.get(id=vital_id)
+        except PatientVital.DoesNotExist:
+            return Response(
+                {"error": "Vital record not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check permissions
+        current_user = request.user
+        is_original_recorder = (vital.recorded_by == current_user)
+        is_admin = current_user.is_superuser
+        is_medical_staff = current_user.role.name in ['doctor', 'nurse']
+        
+        if not (is_original_recorder or is_admin) and is_medical_staff:
+            return Response(
+                {"error": "Only the original recorder or admin can update vitals"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Partial update with validation
+        serializer = UpdatePatientVitalSerializer(
+            vital, 
+            data=request.data, 
+            partial=True
+        )
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                'status': 'success',
+                'message': 'Vital signs updated successfully',
+                'data': PatientVitalSerializer(vital).data
+            }, status=status.HTTP_200_OK)
+        
+        return Response({
+            'status': 'error',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def create_test_request(request):
+    """Doctors can request tests"""
+    if request.user.role.name != 'doctor':
+        return Response(
+            {"error": "Only doctors can request tests"},
+            status=403
+        )
+    
+    serializer = TestResultSerializer(
+        data=request.data,
+        context={'request': request}
+    )
+    if serializer.is_valid():
+        serializer.save(requesting_doctor=request.user)
+        return Response(serializer.data, status=201)
+    return Response(serializer.errors, status=400)
+
+
+
+
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def update_test_result(request, pk):
+    """Labtech can update test results"""
+    try:
+        test = TestResult.objects.get(pk=pk)
+    except TestResult.DoesNotExist:
+        return Response({"error": "Test not found"}, status=404)
+
+    if request.user.role.name != 'labtech':
+        return Response(
+            {"error": "Only lab technicians can update results"},
+            status=403
+        )
+
+    serializer = TestResultSerializer(
+        test, 
+        data=request.data, 
+        partial=True,
+        context={'request': request}
+    )
+    
+    if serializer.is_valid():
+        if 'status' in request.data and request.data['status'] == 'COMPLETED':
+            serializer.save(performed_by=request.user)
+        else:
+            serializer.save()
+        return Response(serializer.data)
+    return Response(serializer.errors, status=400)
+
+
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_all_test_results(request):
+    """
+    Get all test results (requires authentication)
+    """
+    tests = TestResult.objects.all().order_by('-request_date')
+    serializer = TestResultSerializer(tests, many=True)
+    return Response({
+        'count': tests.count(),
+        'results': serializer.data
+    })
+
+
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_single_test_result(request, test_id):
+    """
+    Get a specific test result by ID (requires authentication)
+    """
+    try:
+        test = TestResult.objects.get(id=test_id)
+        serializer = TestResultSerializer(test)
+        return Response(serializer.data)
+    except TestResult.DoesNotExist:
+        return Response(
+            {"error": "Test result not found"},
+            status=404
+        )
+
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_all_drugs(request):
+    """
+    Get all drugs in inventory
+    Accessible by: All authenticated users
+    """
+    drugs = Drug.objects.all().order_by('name')
+    serializer = DrugSerializer(drugs, many=True)
+    return Response({
+        'count': drugs.count(),
+        'drugs': serializer.data
+    })
+
+
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_specific_drug(request, drug_id):
+    """
+    Get details of a specific drug
+    Accessible by: All authenticated users
+    """
+    try:
+        drug = Drug.objects.get(id=drug_id)
+        serializer = DrugSerializer(drug)
+        return Response(serializer.data)
+    except Drug.DoesNotExist:
+        return Response(
+            {"error": "Drug not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+
+
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])  # Custom permission
+def update_drug(request, drug_id):
+    """
+    Update drug information
+    Allowed for: Pharmacists and Admins
+    """
+    try:
+        drug = Drug.objects.get(pk=drug_id)
+    except Drug.DoesNotExist:
+        return Response(
+            {"error": "Drug not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    serializer = DrugUpdateSerializer(
+        drug, 
+        data=request.data, 
+        partial=True,
+        context={'request': request}
+    )
+
+    if serializer.is_valid():
+        # Update last_restocked if quantity changed
+        if 'current_quantity' in request.data:
+            drug.last_restocked = timezone.now()
+        
+        serializer.save()
+        return Response(DrugSerializer(drug).data)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
