@@ -446,3 +446,271 @@ class PatientAppointmentSerializer(serializers.ModelSerializer):
 
     def get_is_past(self, obj):
         return obj.appointment_date <= timezone.now()
+
+
+class DoctorAppointmentSerializer(serializers.ModelSerializer):
+    """
+    Serializer for appointments from doctor's perspective
+    Includes patient information and profile picture
+    """
+    patient_name = serializers.SerializerMethodField()
+    patient_profile_picture = serializers.SerializerMethodField()
+    patient_email = serializers.SerializerMethodField()
+    patient_phone = serializers.SerializerMethodField()
+    formatted_date = serializers.SerializerMethodField()
+    time_until_appointment = serializers.SerializerMethodField()
+    is_upcoming = serializers.SerializerMethodField()
+    is_past = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Appointment
+        fields = [
+            'id',
+            'appointment_date',
+            'formatted_date',
+            'time_until_appointment',
+            'status',
+            'patient_reason_for_appointment',
+            'created_at',
+            'updated_at',
+            'patient_id',
+            'patient_name',
+            'patient_email',
+            'patient_phone',
+            'patient_profile_picture',
+            'is_upcoming',
+            'is_past',
+            'is_patient_available',
+            'is_vitals_taken',
+            'is_doctor_done_with_patient',
+            'is_doctor_with_patient',
+        ]
+        read_only_fields = fields
+
+    def get_patient_name(self, obj):
+        return f"{obj.patient.first_name} {obj.patient.last_name}"
+
+    def get_patient_profile_picture(self, obj):
+        if hasattr(obj.patient, 'profile') and obj.patient.profile and obj.patient.profile.profile_picture:
+            request = self.context.get('request')
+            if request is not None:
+                return request.build_absolute_uri(obj.patient.profile.profile_picture.url)
+            return obj.patient.profile.profile_picture.url
+        return None
+
+    def get_patient_email(self, obj):
+        return obj.patient.email
+
+    def get_patient_phone(self, obj):
+        if hasattr(obj.patient, 'profile') and obj.patient.profile:
+            return obj.patient.profile.phone_number
+        return None
+
+    def get_formatted_date(self, obj):
+        return obj.appointment_date.strftime('%B %d, %Y %I:%M %p')
+
+    def get_time_until_appointment(self, obj):
+        now = timezone.now()
+        delta = obj.appointment_date - now
+        
+        if delta.days < 0:
+            return "Past appointment"
+        elif delta.days == 0:
+            if delta.seconds < 3600:  # Less than 1 hour
+                minutes = delta.seconds // 60
+                return f"In {minutes} minute{'s' if minutes != 1 else ''}"
+            else:
+                hours = delta.seconds // 3600
+                return f"Today in {hours} hour{'s' if hours != 1 else ''}"
+        elif delta.days == 1:
+            return "Tomorrow"
+        elif delta.days < 7:
+            return f"In {delta.days} days"
+        else:
+            return obj.appointment_date.strftime('%B %d, %Y')
+
+    def get_is_upcoming(self, obj):
+        return obj.appointment_date > timezone.now()
+
+    def get_is_past(self, obj):
+        return obj.appointment_date <= timezone.now()
+
+
+class AppointmentDetailSerializer(serializers.ModelSerializer):
+    """
+    Detailed serializer for a single appointment
+    Includes complete patient and doctor information with profiles
+    """
+    # Patient information
+    patient_info = serializers.SerializerMethodField()
+    
+    # Doctor information
+    doctor_info = serializers.SerializerMethodField()
+    
+    # Nurse information (if assigned)
+    nurse_info = serializers.SerializerMethodField()
+    
+    # Formatted fields
+    formatted_date = serializers.SerializerMethodField()
+    time_until_appointment = serializers.SerializerMethodField()
+    is_upcoming = serializers.SerializerMethodField()
+    is_past = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Appointment
+        fields = [
+            'id',
+            'appointment_date',
+            'formatted_date',
+            'time_until_appointment',
+            'status',
+            'patient_reason_for_appointment',
+            'created_at',
+            'updated_at',
+            'patient_info',
+            'doctor_info',
+            'nurse_info',
+            'is_upcoming',
+            'is_past',
+            'is_patient_available',
+            'is_vitals_taken',
+            'is_doctor_done_with_patient',
+            'is_doctor_with_patient',
+        ]
+        read_only_fields = fields
+
+    def get_patient_info(self, obj):
+        """Get complete patient information including profile"""
+        patient = obj.patient
+        profile = getattr(patient, 'profile', None)
+        
+        patient_data = {
+            'id': patient.id,
+            'email': patient.email,
+            'first_name': patient.first_name,
+            'last_name': patient.last_name,
+            'full_name': f"{patient.first_name} {patient.last_name}",
+        }
+        
+        if profile:
+            request = self.context.get('request')
+            patient_data['profile'] = {
+                'phone_number': profile.phone_number,
+                'date_of_birth': profile.date_of_birth.strftime('%Y-%m-%d') if profile.date_of_birth else None,
+                'gender': profile.gender,
+                'address': profile.address,
+                'marital_status': profile.marital_status,
+                'blood_group': profile.blood_group,
+                'genotype': profile.genotype,
+                'national_id': profile.national_id,
+                'emergency_contact': profile.emergency_contact,
+                'next_of_kin': profile.next_of_kin,
+                'relationship_to_next_of_kin': profile.relationship_to_next_of_kin,
+                'is_admitted': profile.is_admitted,
+                'profile_picture': None
+            }
+            
+            # Add profile picture URL if available
+            if profile.profile_picture:
+                if request:
+                    patient_data['profile']['profile_picture'] = request.build_absolute_uri(profile.profile_picture.url)
+                else:
+                    patient_data['profile']['profile_picture'] = profile.profile_picture.url
+        
+        return patient_data
+
+    def get_doctor_info(self, obj):
+        """Get complete doctor information including profile"""
+        doctor = obj.doctor
+        profile = getattr(doctor, 'profile', None)
+        
+        doctor_data = {
+            'id': doctor.id,
+            'email': doctor.email,
+            'first_name': doctor.first_name,
+            'last_name': doctor.last_name,
+            'full_name': f"{doctor.first_name} {doctor.last_name}",
+        }
+        
+        if profile:
+            request = self.context.get('request')
+            doctor_data['profile'] = {
+                'phone_number': profile.phone_number,
+                'specialization': profile.specialization,
+                'bio': profile.bio,
+                'license_number': profile.license_number,
+                'qualification': profile.qualification,
+                'employment_date': profile.employment_date.strftime('%Y-%m-%d') if profile.employment_date else None,
+                'department': profile.department.name if profile.department else None,
+                'profile_picture': None
+            }
+            
+            # Add profile picture URL if available
+            if profile.profile_picture:
+                if request:
+                    doctor_data['profile']['profile_picture'] = request.build_absolute_uri(profile.profile_picture.url)
+                else:
+                    doctor_data['profile']['profile_picture'] = profile.profile_picture.url
+        
+        return doctor_data
+
+    def get_nurse_info(self, obj):
+        """Get nurse information if assigned"""
+        if not obj.nurse:
+            return None
+            
+        nurse = obj.nurse
+        profile = getattr(nurse, 'profile', None)
+        
+        nurse_data = {
+            'id': nurse.id,
+            'email': nurse.email,
+            'first_name': nurse.first_name,
+            'last_name': nurse.last_name,
+            'full_name': f"{nurse.first_name} {nurse.last_name}",
+        }
+        
+        if profile:
+            request = self.context.get('request')
+            nurse_data['profile'] = {
+                'phone_number': profile.phone_number,
+                'profile_picture': None
+            }
+            
+            # Add profile picture URL if available
+            if profile.profile_picture:
+                if request:
+                    nurse_data['profile']['profile_picture'] = request.build_absolute_uri(profile.profile_picture.url)
+                else:
+                    nurse_data['profile']['profile_picture'] = profile.profile_picture.url
+        
+        return nurse_data
+
+    def get_formatted_date(self, obj):
+        return obj.appointment_date.strftime('%B %d, %Y %I:%M %p')
+
+    def get_time_until_appointment(self, obj):
+        now = timezone.now()
+        delta = obj.appointment_date - now
+        
+        if delta.days < 0:
+            return "Past appointment"
+        elif delta.days == 0:
+            if delta.seconds < 3600:  # Less than 1 hour
+                minutes = delta.seconds // 60
+                return f"In {minutes} minute{'s' if minutes != 1 else ''}"
+            else:
+                hours = delta.seconds // 3600
+                return f"Today in {hours} hour{'s' if hours != 1 else ''}"
+        elif delta.days == 1:
+            return "Tomorrow"
+        elif delta.days < 7:
+            return f"In {delta.days} days"
+        else:
+            return obj.appointment_date.strftime('%B %d, %Y')
+
+    def get_is_upcoming(self, obj):
+        return obj.appointment_date > timezone.now()
+
+    def get_is_past(self, obj):
+        return obj.appointment_date <= timezone.now()

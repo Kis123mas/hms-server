@@ -242,3 +242,118 @@ def get_patient_appointments(request):
             'message': str(e),
             'traceback': error_traceback
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def mark_patient_available(request, appointment_id):
+    """
+    Allow a patient to mark themselves as available for their appointment
+    Updates the is_patient_available field to True
+    """
+    try:
+        # Verify the user is a patient
+        if not hasattr(request.user, 'role') or request.user.role.name != 'patient':
+            return Response(
+                {"error": "Only patients can mark themselves as available."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get the appointment and verify it belongs to the current patient
+        try:
+            appointment = Appointment.objects.get(
+                id=appointment_id,
+                patient=request.user
+            )
+        except Appointment.DoesNotExist:
+            return Response(
+                {"error": "Appointment not found or you don't have permission to modify it."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Update the is_patient_available field to True
+        appointment.is_patient_available = True
+        # Use update_fields to ensure the signal properly detects the change
+        appointment.save(update_fields=['is_patient_available'])
+
+        return Response({
+            'status': 'success',
+            'message': 'You have been marked as available for this appointment.',
+            'appointment_id': appointment.id,
+            'is_patient_available': appointment.is_patient_available,
+            'appointment_date': appointment.appointment_date,
+            'doctor': f"{appointment.doctor.first_name} {appointment.doctor.last_name}"
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def mark_vitals_taken(request, appointment_id):
+    """
+    Allow a nurse to mark vitals as taken for an appointment
+    Updates the is_vitals_taken field to True and tracks which nurse took vitals
+    """
+    try:
+        # Verify the user is a nurse
+        if not hasattr(request.user, 'role') or request.user.role.name != 'nurse':
+            return Response(
+                {"error": "Only nurses can mark vitals as taken."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get the appointment
+        try:
+            appointment = Appointment.objects.get(id=appointment_id)
+        except Appointment.DoesNotExist:
+            return Response(
+                {"error": "Appointment not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check if the nurse is in the same department as the doctor (optional security check)
+        if (hasattr(request.user, 'profile') and request.user.profile and 
+            hasattr(appointment.doctor, 'profile') and appointment.doctor.profile and
+            request.user.profile.department != appointment.doctor.profile.department):
+            return Response(
+                {"error": "You can only take vitals for appointments in your department."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Update the is_vitals_taken field to True and track the nurse
+        appointment.is_vitals_taken = True
+        appointment.nurse = request.user
+        # Use update_fields to ensure the signal properly detects the change
+        appointment.save(update_fields=['is_vitals_taken', 'nurse'])
+
+        return Response({
+            'status': 'success',
+            'message': 'Vitals have been marked as taken for this appointment.',
+            'appointment_id': appointment.id,
+            'is_vitals_taken': appointment.is_vitals_taken,
+            'nurse_name': f"{request.user.first_name} {request.user.last_name}",
+            'appointment_date': appointment.appointment_date,
+            'patient': f"{appointment.patient.first_name} {appointment.patient.last_name}",
+            'doctor': f"{appointment.doctor.first_name} {appointment.doctor.last_name}"
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+    
