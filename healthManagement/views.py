@@ -356,4 +356,231 @@ def mark_vitals_taken(request, appointment_id):
 
 
 
-    
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def mark_doctor_with_patient(request, appointment_id):
+    """
+    Allow a doctor to mark is_doctor_with_patient as True for an appointment the doctor is already associated to the appointment
+    Updates the is_doctor_with_patient field to True and tracks which doctor is with the patient
+    """
+    try:
+        # Verify the user is a doctor
+        if not hasattr(request.user, 'role') or request.user.role.name != 'doctor':
+            return Response(
+                {"error": "Only doctors can mark is_doctor_with_patient as True."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get the appointment
+        try:
+            appointment = Appointment.objects.get(id=appointment_id)
+        except Appointment.DoesNotExist:
+            return Response(
+                {"error": "Appointment not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check if the doctor is authorized for this appointment
+        # The doctor must be the appointment's doctor OR in the same department as the appointment's doctor
+        if request.user != appointment.doctor:
+            # If not the appointment's doctor, check department match
+            if (hasattr(request.user, 'profile') and request.user.profile and 
+                hasattr(appointment.doctor, 'profile') and appointment.doctor.profile and
+                request.user.profile.department != appointment.doctor.profile.department):
+                return Response(
+                    {"error": "You can only mark appointments for your own patients or patients in your department."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        # Update the is_doctor_with_patient field to True
+        appointment.is_doctor_with_patient = True
+        # Use update_fields to ensure the signal properly detects the change
+        appointment.save(update_fields=['is_doctor_with_patient'])
+
+        return Response({
+            'status': 'success',
+            'message': 'Doctor has been marked as with the patient for this appointment.',
+            'appointment_id': appointment.id,
+            'is_doctor_with_patient': appointment.is_doctor_with_patient,
+            'doctor_name': f"{request.user.first_name} {request.user.last_name}",
+            'appointment_date': appointment.appointment_date,
+            'patient': f"{appointment.patient.first_name} {appointment.patient.last_name}",
+            'doctor': f"{appointment.doctor.first_name} {appointment.doctor.last_name}"
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def mark_doctor_done_with_patient(request, appointment_id):
+    """
+    Allow a doctor to mark is_doctor_done_with_patient as True for an appointment
+    Updates the is_doctor_done_with_patient field to True
+    """
+    try:
+        # Verify the user is a doctor
+        if not hasattr(request.user, 'role') or request.user.role.name != 'doctor':
+            return Response(
+                {"error": "Only doctors can mark is_doctor_done_with_patient as True."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get the appointment
+        try:
+            appointment = Appointment.objects.get(id=appointment_id)
+        except Appointment.DoesNotExist:
+            return Response(
+                {"error": "Appointment not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check if the doctor is authorized for this appointment
+        # The doctor must be the appointment's doctor OR in the same department as the appointment's doctor
+        if request.user != appointment.doctor:
+            # If not the appointment's doctor, check department match
+            if (hasattr(request.user, 'profile') and request.user.profile and 
+                hasattr(appointment.doctor, 'profile') and appointment.doctor.profile and
+                request.user.profile.department != appointment.doctor.profile.department):
+                return Response(
+                    {"error": "You can only mark appointments for your own patients or patients in your department."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        # Update the is_doctor_done_with_patient field to True
+        appointment.is_doctor_done_with_patient = True
+        # Use update_fields to ensure the signal properly detects the change
+        appointment.save(update_fields=['is_doctor_done_with_patient'])
+
+        return Response({
+            'status': 'success',
+            'message': 'Doctor has been marked as done with the patient for this appointment.',
+            'appointment_id': appointment.id,
+            'is_doctor_done_with_patient': appointment.is_doctor_done_with_patient,
+            'doctor_name': f"{request.user.first_name} {request.user.last_name}",
+            'appointment_date': appointment.appointment_date,
+            'patient': f"{appointment.patient.first_name} {appointment.patient.last_name}",
+            'doctor': f"{appointment.doctor.first_name} {appointment.doctor.last_name}"
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def create_patient_vital(request):
+    """
+    Create vital signs for a patient
+    - Only nurses and doctors can record vitals
+    - Requires patient_id, appointment_id, and vital sign measurements
+    - Updates appointment's is_vitals_taken field and triggers notifications
+    """
+    try:
+        # Verify the user is a nurse or doctor
+        if not hasattr(request.user, 'role') or request.user.role.name not in ['nurse', 'doctor']:
+            return Response(
+                {"error": "Only nurses and doctors can record patient vitals."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get patient_id and appointment_id from request data
+        patient_id = request.data.get('patient_id')
+        appointment_id = request.data.get('appointment_id')
+        
+        if not patient_id:
+            return Response(
+                {"error": "patient_id is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not appointment_id:
+            return Response(
+                {"error": "appointment_id is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verify patient exists and is actually a patient
+        try:
+            patient = APPLICATIONS_USER_MODEL.objects.get(
+                id=patient_id,
+                role__name='patient'
+            )
+        except APPLICATIONS_USER_MODEL.DoesNotExist:
+            return Response(
+                {"error": "Patient not found or invalid patient ID."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Verify appointment exists and belongs to the patient
+        try:
+            appointment = Appointment.objects.get(
+                id=appointment_id,
+                patient=patient
+            )
+        except Appointment.DoesNotExist:
+            return Response(
+                {"error": "Appointment not found or does not belong to this patient."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Create vital sign record
+        vital_data = {
+            'patient': patient.id,
+            'temperature_c': request.data.get('temperature_c'),
+            'pulse_rate': request.data.get('pulse_rate'),
+            'respiratory_rate': request.data.get('respiratory_rate'),
+            'systolic_bp': request.data.get('systolic_bp'),
+            'diastolic_bp': request.data.get('diastolic_bp'),
+            'oxygen_saturation': request.data.get('oxygen_saturation'),
+            'weight_kg': request.data.get('weight_kg'),
+            'height_cm': request.data.get('height_cm'),
+            'notes': request.data.get('notes', '')
+        }
+
+        serializer = VitalSignSerializer(data=vital_data, context={'request': request})
+        
+        if serializer.is_valid():
+            # Save with the current user as recorded_by
+            vital_sign = serializer.save(recorded_by=request.user)
+            
+            # Update appointment's is_vitals_taken field to True
+            # This will trigger the send_vitals_taken_notification signal
+            # which sends notifications to the doctor and patient
+            appointment.is_vitals_taken = True
+            if request.user.role.name == 'nurse' and not appointment.nurse:
+                appointment.nurse = request.user
+            appointment.save(update_fields=['is_vitals_taken', 'nurse'])
+            
+            # Return the created vital sign with full details
+            response_serializer = VitalSignSerializer(vital_sign, context={'request': request})
+            
+            return Response({
+                'status': 'success',
+                'message': f'Vital signs recorded successfully for {patient.first_name} {patient.last_name}. Notifications sent to doctor and patient.',
+                'vital_sign': response_serializer.data,
+                'appointment_updated': True
+            }, status=status.HTTP_201_CREATED)
+        else:
+            return Response({
+                'status': 'error',
+                'message': 'Invalid data provided.',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -714,3 +714,80 @@ class AppointmentDetailSerializer(serializers.ModelSerializer):
 
     def get_is_past(self, obj):
         return obj.appointment_date <= timezone.now()
+
+
+class VitalSignSerializer(serializers.ModelSerializer):
+    """
+    Serializer for VitalSign model
+    Includes patient and recorded_by information
+    """
+    patient_info = serializers.SerializerMethodField()
+    recorded_by_info = serializers.SerializerMethodField()
+    bmi = serializers.SerializerMethodField()
+    blood_pressure = serializers.SerializerMethodField()
+    recorded_at_formatted = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = VitalSign
+        fields = [
+            'id',
+            'patient',
+            'patient_info',
+            'recorded_by',
+            'recorded_by_info',
+            'recorded_at',
+            'recorded_at_formatted',
+            'temperature_c',
+            'pulse_rate',
+            'respiratory_rate',
+            'systolic_bp',
+            'diastolic_bp',
+            'blood_pressure',
+            'oxygen_saturation',
+            'weight_kg',
+            'height_cm',
+            'bmi',
+            'notes'
+        ]
+        read_only_fields = ['recorded_at', 'recorded_by']
+    
+    def get_patient_info(self, obj):
+        """Include patient's basic information"""
+        if not obj.patient:
+            return None
+        
+        patient = obj.patient
+        return {
+            'id': patient.id,
+            'email': patient.email,
+            'first_name': patient.first_name,
+            'last_name': patient.last_name,
+            'full_name': f"{patient.first_name} {patient.last_name}".strip()
+        }
+    
+    def get_recorded_by_info(self, obj):
+        """Include recorded_by (nurse/doctor) information"""
+        if not obj.recorded_by:
+            return None
+        
+        recorder = obj.recorded_by
+        return {
+            'id': recorder.id,
+            'email': recorder.email,
+            'first_name': recorder.first_name,
+            'last_name': recorder.last_name,
+            'full_name': f"{recorder.first_name} {recorder.last_name}".strip(),
+            'role': recorder.role.name if hasattr(recorder, 'role') and recorder.role else None
+        }
+    
+    def get_bmi(self, obj):
+        """Get calculated BMI"""
+        return obj.bmi()
+    
+    def get_blood_pressure(self, obj):
+        """Format blood pressure as systolic/diastolic"""
+        return f"{obj.systolic_bp}/{obj.diastolic_bp}"
+    
+    def get_recorded_at_formatted(self, obj):
+        """Format recorded_at timestamp"""
+        return obj.recorded_at.strftime('%B %d, %Y %I:%M %p')

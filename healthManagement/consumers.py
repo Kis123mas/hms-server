@@ -106,6 +106,7 @@ class SimpleConsumer(AsyncWebsocketConsumer):
         - 'get_notifications': Get user notifications
         - 'get_doctor_appointments': Get doctor appointments (uses connected user's email)
         - 'get_appointment_detail': Get specific appointment details (requires 'appointment_id' in data)
+        - 'get_department_appointments_today': Get all appointments for doctors in same department for today
         """
         try:
             data = json.loads(text_data)
@@ -119,6 +120,8 @@ class SimpleConsumer(AsyncWebsocketConsumer):
                 await self.handle_get_doctor_appointments(data.get('data', {}))
             elif action == 'get_appointment_detail':
                 await self.handle_get_appointment_detail(data.get('data', {}))
+            elif action == 'get_department_appointments_today':
+                await self.handle_get_department_appointments_today(data.get('data', {}))
             else:
                 await self.send(text_data=json.dumps({
                     'type': 'error',
@@ -282,6 +285,105 @@ class SimpleConsumer(AsyncWebsocketConsumer):
             print(f"Error getting appointment detail: {str(e)}")
             return None
     
+    async def handle_get_department_appointments_today(self, data):
+        """
+        Handle get_department_appointments_today action
+        Gets all appointments for doctors in the same department as the connected user
+        for the present day only
+        """
+        try:
+            appointments = await self.get_department_appointments_today(self.email)
+            await self.send(text_data=json.dumps({
+                'type': 'department_appointments_today_data',
+                'data': appointments
+            }))
+        except Exception as e:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': f'Failed to fetch department appointments: {str(e)}'
+            }))
+    
+    @database_sync_to_async
+    def get_department_appointments_today(self, email):
+        """
+        Get all appointments for doctors in the same department as the user
+        for the present day only
+        """
+        try:
+            from django.db.models import Q
+            from datetime import datetime, time
+            
+            # Get the user
+            user = CustomUser.objects.get(email=email)
+            
+            # Check if user has a profile and department
+            if not hasattr(user, 'profile') or not user.profile or not user.profile.department:
+                return {
+                    'nurse_appointments': [],
+                    'message': 'User does not have a department assigned'
+                }
+            
+            user_department = user.profile.department
+            
+            # Get today's date range (start of day to end of day)
+            today = timezone.now().date()
+            start_of_day = timezone.make_aware(datetime.combine(today, time.min))
+            end_of_day = timezone.make_aware(datetime.combine(today, time.max))
+            
+            # Get all doctors in the same department
+            doctors_in_department = CustomUser.objects.filter(
+                role__name='doctor',
+                profile__department=user_department,
+                is_active=True
+            )
+            
+            # Get all appointments for those doctors for today
+            appointments = Appointment.objects.filter(
+                doctor__in=doctors_in_department,
+                appointment_date__gte=start_of_day,
+                appointment_date__lte=end_of_day
+            ).select_related(
+                'doctor',
+                'doctor__profile',
+                'doctor__profile__department',
+                'patient',
+                'patient__profile',
+                'nurse',
+                'nurse__profile'
+            ).order_by('appointment_date')
+            
+            # Create a fake request context for URL building
+            from django.test.client import RequestFactory
+            factory = RequestFactory()
+            request = factory.get('/')
+            
+            # Serialize the appointments
+            serializer = DoctorAppointmentSerializer(
+                appointments,
+                many=True,
+                context={'request': request}
+            )
+            
+            return {
+                'nurse_appointments': serializer.data,
+                'department': user_department.name,
+                'count': appointments.count(),
+                'date': today.isoformat()
+            }
+            
+        except CustomUser.DoesNotExist:
+            print(f"User with email {email} not found")
+            return {
+                'nurse_appointments': [],
+                'error': 'User not found'
+            }
+        except Exception as e:
+            print(f"Error getting department appointments: {str(e)}")
+            return {
+                'nurse_appointments': [],
+                'error': str(e)
+            }
+    
     @database_sync_to_async
     def check_user_exists(self, email):
         """
@@ -365,10 +467,19 @@ class SimpleConsumer(AsyncWebsocketConsumer):
         try:
             # Get the message from the event
             message = event.get('message', {})
+            action = message.get('action')
             
-            # If the message is a get_notifications action, fetch and send notifications
-            if message.get('action') == 'get_notifications':
+            # Handle different get actions by calling their respective handlers
+            if action == 'get_notifications':
                 await self.handle_get_notifications(message.get('data', {}))
+            elif action == 'get_appointments':
+                await self.handle_get_appointments(message.get('data', {}))
+            elif action == 'get_doctor_appointments':
+                await self.handle_get_doctor_appointments(message.get('data', {}))
+            elif action == 'get_appointment_detail':
+                await self.handle_get_appointment_detail(message.get('data', {}))
+            elif action == 'get_department_appointments_today':
+                await self.handle_get_department_appointments_today(message.get('data', {}))
             else:
                 # Otherwise, just forward the message
                 await self.send(text_data=json.dumps({

@@ -14,4 +14,9 @@ urlpatterns = [
     path('mark_available/<int:appointment_id>', mark_patient_available),
     path('mark_vitals_taken/<int:appointment_id>', mark_vitals_taken),
     
+    path('mark_doctor_with_patient/<int:appointment_id>', mark_doctor_with_patient),
+    path('mark_doctor_done_with_patient/<int:appointment_id>', mark_doctor_done_with_patient),
+    
+    # Vital signs endpoints
+    path('create_patient_vital', create_patient_vital),
 ]
