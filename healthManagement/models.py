@@ -215,6 +215,97 @@ class VitalSign(models.Model):
     def bmi(self):
         """Calculate BMI if weight and height are provided."""
         if self.weight_kg and self.height_cm:
-            height_m = self.height_cm / 100
-            return round(self.weight_kg / (height_m ** 2), 1)
+            height_m = self.height_cm / 100  # Convert cm to m
+            return round(float(self.weight_kg) / (height_m ** 2), 1)
         return None
+
+
+class MedicalRecord(models.Model):
+    """
+    Tracks patient medical diagnoses, treatment, and progress.
+    """
+    SEVERITY_CHOICES = [
+        ('mild', 'Mild'),
+        ('moderate', 'Moderate'),
+        ('severe', 'Severe'),
+        ('critical', 'Critical'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('resolved', 'Resolved'),
+        ('chronic', 'Chronic'),
+        ('follow_up', 'Needs Follow-up'),
+    ]
+
+    patient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='medical_records',
+        limit_choices_to={'role__name': 'patient'}
+    )
+    doctor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='treated_patients',
+        limit_choices_to={'role__name': 'doctor'}
+    )
+    diagnosis = models.CharField(max_length=255, help_text="Primary diagnosis or condition")
+    diagnosis_code = models.CharField(max_length=20, blank=True, null=True, help_text="ICD-10 code if available")
+    symptoms = models.TextField(help_text="Patient's reported symptoms")
+    examination_findings = models.TextField(blank=True, null=True, help_text="Doctor's examination findings")
+    doctor_notes = models.TextField(blank=True, null=True, help_text="Detailed clinical notes")
+    treatment_plan = models.TextField(blank=True, null=True, help_text="Prescribed treatment and management plan")
+    severity = models.CharField(
+        max_length=20,
+        choices=SEVERITY_CHOICES,
+        default='moderate',
+        help_text="Severity of the condition"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='active',
+        help_text="Current status of the medical condition"
+    )
+    is_resolved = models.BooleanField(default=False, help_text="Check if the condition has been resolved")
+    resolved_date = models.DateField(blank=True, null=True, help_text="Date when the condition was resolved")
+    follow_up_date = models.DateField(blank=True, null=True, help_text="Next follow-up date if needed")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    vital_signs = models.ForeignKey(
+        VitalSign,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='medical_records',
+        help_text="Vital signs recorded during this visit"
+    )
+    appointment = models.ForeignKey(
+        'Appointment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='medical_records',
+        help_text="Related appointment if applicable"
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Medical Record'
+        verbose_name_plural = 'Medical Records'
+
+    def __str__(self):
+        return f"{self.patient.get_full_name()} - {self.diagnosis} ({self.get_status_display()})"
+    
+    def save(self, *args, **kwargs):
+        # Automatically update resolved_date when is_resolved is set to True
+        if self.is_resolved and not self.resolved_date:
+            self.resolved_date = timezone.now().date()
+            self.status = 'resolved'
+        elif not self.is_resolved and self.status == 'resolved':
+            self.status = 'active'
+            self.resolved_date = None
+        super().save(*args, **kwargs)

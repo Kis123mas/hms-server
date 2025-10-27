@@ -9,3 +9,5 @@ admin.site.register(Department),
 admin.site.register(Appointment),
 admin.site.register(Notification),
 admin.site.register(VitalSign),
+admin.site.register(MedicalRecord),
+

@@ -296,6 +296,87 @@ def mark_patient_available(request, appointment_id):
 
 
 
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def mark_patient_left(request, appointment_id):
+    """
+    Allow a patient to mark themselves as having left the hospital
+    Updates the is_patient_available field to False and marks appointment as canceled
+    Sends notifications to both doctor and nurse
+    """
+    try:
+        # Verify the user is a patient
+        if not hasattr(request.user, 'role') or request.user.role.name != 'patient':
+            return Response(
+                {"error": "Only patients can mark themselves as having left."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get the appointment and verify it belongs to the current patient
+        try:
+            appointment = Appointment.objects.get(
+                id=appointment_id,
+                patient=request.user
+            )
+        except Appointment.DoesNotExist:
+            return Response(
+                {"error": "Appointment not found or you don't have permission to modify it."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check if appointment is already completed or canceled
+        if appointment.status in ['completed', 'canceled']:
+            return Response(
+                {"error": f"Cannot update status of a {appointment.status} appointment."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Update the appointment status and patient availability
+        appointment.is_patient_available = False
+        appointment.status = 'canceled'
+        appointment.save(update_fields=['is_patient_available', 'status'])
+
+        # Create notification for doctor
+        if appointment.doctor:
+            Notification.objects.create(
+                title="Patient Left - Appointment Canceled",
+                message=f"Patient {request.user.get_full_name()} has left the hospital and their appointment has been canceled.",
+                sender=request.user,
+                receivers=[appointment.doctor]
+            )
+
+        # Create notification for nurse if assigned
+        if appointment.nurse:
+            Notification.objects.create(
+                title="Patient Left - Appointment Canceled",
+                message=f"Patient {request.user.get_full_name()} has left the hospital and their appointment has been canceled.",
+                sender=request.user,
+                receivers=[appointment.nurse]
+            )
+
+        return Response({
+            'status': 'success',
+            'message': 'You have been marked as having left the hospital. Your appointment has been canceled.',
+            'appointment_id': appointment.id,
+            'status': appointment.get_status_display(),
+            'is_patient_available': appointment.is_patient_available,
+            'canceled_at': timezone.now().isoformat()
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        error_traceback = traceback.format_exc()
+        print(f"Error in mark_patient_left: {str(e)}")
+        print(f"Traceback: {error_traceback}")
+        
+        return Response({
+            'status': 'error',
+            'message': 'Failed to update patient status',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
 
 @api_view(['PATCH'])
 @authentication_classes([TokenAuthentication])
@@ -583,4 +664,214 @@ def create_patient_vital(request):
         return Response({
             'status': 'error',
             'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def confirm_appointment(request, appointment_id):
+    """
+    Allow a doctor to confirm an appointment
+    Changes appointment status to 'confirmed'
+    Sends notification to the patient who booked the appointment
+    """
+    try:
+        # Verify the user is a doctor
+        if not hasattr(request.user, 'role') or request.user.role.name != 'doctor':
+            return Response(
+                {"error": "Only doctors can confirm appointments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get the appointment
+        try:
+            appointment = Appointment.objects.get(id=appointment_id)
+        except Appointment.DoesNotExist:
+            return Response(
+                {"error": "Appointment not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Verify the doctor is authorized for this appointment
+        if request.user != appointment.doctor:
+            return Response(
+                {"error": "You can only confirm your own appointments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Check if appointment is in pending status
+        if appointment.status != 'pending':
+            return Response(
+                {"error": f"Appointment is already {appointment.status}. Only pending appointments can be confirmed."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Update appointment status to confirmed
+        appointment.status = 'confirmed'
+        appointment.save(update_fields=['status'])
+
+        # Create notification for the patient
+        notification = Notification.objects.create(
+            sender=request.user,
+            title="Appointment Confirmed",
+            message=f"Dr. {request.user.first_name} {request.user.last_name} has confirmed your appointment scheduled for {appointment.appointment_date.strftime('%B %d, %Y at %I:%M %p')}."
+        )
+        notification.receivers.add(appointment.patient)
+
+        # Send WebSocket notification to the patient
+        from .signals import send_websocket_notification_to_users, send_refresh_appointment_action
+        send_websocket_notification_to_users(notification)
+        send_refresh_appointment_action([appointment.patient], appointment.id)
+
+        return Response({
+            'status': 'success',
+            'message': 'Appointment confirmed successfully. Patient has been notified.',
+            'appointment_id': appointment.id,
+            'appointment_status': appointment.status,
+            'appointment_date': appointment.appointment_date,
+            'patient': f"{appointment.patient.first_name} {appointment.patient.last_name}"
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def cancel_appointment(request, appointment_id):
+    """
+    Allow a doctor to cancel an appointment
+    Changes appointment status to 'cancelled'
+    Sends notification to the patient who booked the appointment
+    """
+    try:
+        # Verify the user is a doctor
+        if not hasattr(request.user, 'role') or request.user.role.name != 'doctor':
+            return Response(
+                {"error": "Only doctors can cancel appointments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get the appointment
+        try:
+            appointment = Appointment.objects.get(id=appointment_id)
+        except Appointment.DoesNotExist:
+            return Response(
+                {"error": "Appointment not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Verify the doctor is authorized for this appointment
+        if request.user != appointment.doctor:
+            return Response(
+                {"error": "You can only cancel your own appointments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Check if appointment can be cancelled
+        if appointment.status in ['cancelled', 'completed']:
+            return Response(
+                {"error": f"Appointment is already {appointment.status} and cannot be cancelled."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Optional: Get cancellation reason from request
+        cancellation_reason = request.data.get('reason', 'No reason provided')
+
+        # Update appointment status to cancelled
+        appointment.status = 'cancelled'
+        appointment.save(update_fields=['status'])
+
+        # Create notification for the patient
+        notification = Notification.objects.create(
+            sender=request.user,
+            title="Appointment Cancelled",
+            message=f"Dr. {request.user.first_name} {request.user.last_name} has cancelled your appointment scheduled for {appointment.appointment_date.strftime('%B %d, %Y at %I:%M %p')}. Reason: {cancellation_reason}"
+        )
+        notification.receivers.add(appointment.patient)
+
+        # Send WebSocket notification to the patient
+        from .signals import send_websocket_notification_to_users, send_refresh_appointment_action
+        send_websocket_notification_to_users(notification)
+        send_refresh_appointment_action([appointment.patient], appointment.id)
+
+        return Response({
+            'status': 'success',
+            'message': 'Appointment cancelled successfully. Patient has been notified.',
+            'appointment_id': appointment.id,
+            'appointment_status': appointment.status,
+            'appointment_date': appointment.appointment_date,
+            'patient': f"{appointment.patient.first_name} {appointment.patient.last_name}",
+            'cancellation_reason': cancellation_reason
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_patient_vitals(request, patient_id):
+    """
+    Get all vital signs for a specific patient
+    - Accessible by any authenticated user
+    - Returns all vital sign records for the specified patient
+    - Ordered by most recent first
+    - Uses VitalSignSerializer for consistent data formatting
+    """
+    try:
+        # Check if patient exists and is actually a patient
+        try:
+            patient = APPLICATIONS_USER_MODEL.objects.get(
+                id=patient_id,
+                role__name='patient'
+            )
+        except APPLICATIONS_USER_MODEL.DoesNotExist:
+            return Response(
+                {"error": "Patient not found or invalid patient ID"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Get all vital signs for this patient with related data
+        vitals = VitalSign.objects.filter(
+            patient=patient
+        ).select_related(
+            'patient',
+            'recorded_by'
+        ).order_by('-recorded_at')
+
+        # Serialize the data using the existing VitalSignSerializer
+        serializer = VitalSignSerializer(vitals, many=True, context={'request': request})
+
+        # Get patient's full name
+        patient_name = f"{patient.first_name} {patient.last_name}"
+
+        return Response({
+            'status': 'success',
+            'patient': {
+                'id': patient.id,
+                'name': patient_name,
+                'email': patient.email
+            },
+            'vital_signs': serializer.data,
+            'count': len(serializer.data),
+            'last_updated': vitals.first().recorded_at.isoformat() if vitals.exists() else None
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': 'Failed to retrieve patient vitals',
+            'detail': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
