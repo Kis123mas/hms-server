@@ -165,10 +165,10 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 
 # Email backend for Gmail SMTP (real email sending)
-# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-# EMAIL_HOST = 'smtp.gmail.com'
+# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_HOST_USER = 'emmanuelezekielsolomon@gmail.com'
 EMAIL_HOST_PASSWORD = 'hruucctylvjzuybg'
