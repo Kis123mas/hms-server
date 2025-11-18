@@ -1,269 +1,327 @@
-# Hospital Management System API
+# Hospital Management System (HMS)
 
-## Authentication
-All endpoints require authentication. Include this header in all requests:
+A comprehensive Hospital Management System built with Django and Django REST Framework, designed to streamline hospital operations including patient management, appointments, medical records, pharmacy operations, and financial accounting.
+
+## 🏥 Features
+
+### Core Medical Management
+- **Patient Management**: Complete patient profiles with medical history
+- **Appointments**: Doctor-patient appointment scheduling and management
+- **Medical Records**: Comprehensive electronic health records (EHR)
+- **Vital Signs**: Tracking and monitoring patient vitals
+- **Treatments**: Medical treatment plans and procedures
+- **Surgery Management**: Surgical procedure scheduling and tracking
+
+### Hospital Operations
+- **Department Management**: Organize hospital departments and specialties
+- **Admission Management**: Patient admission, bed allocation, and discharge
+- **Ward & Room Management**: Hospital infrastructure management
+- **Bed Management**: Real-time bed occupancy tracking
+
+### Pharmacy & Laboratory
+- **Pharmacy Operations**: Drug inventory, prescriptions, and dispensing
+- **Laboratory Services**: Test requests, results, and reporting
+- **Referral System**: Inter-departmental referrals for pharmacy and lab services
+
+### Financial Management
+- **Accounting Module**: Income and expense tracking
+- **Payment Processing**: Multiple payment methods and transaction management
+- **Billing System**: Automated billing for services and treatments
+
+### Communication & Real-time Features
+- **WebSocket Integration**: Real-time notifications and updates
+- **Notifications**: System-wide notification management
+- **Doctor Visits**: Track doctor-patient interactions
+
+## 🛠️ Technology Stack
+
+### Backend
+- **Framework**: Django 5.2.3
+- **API**: Django REST Framework 3.16.0
+- **Real-time**: Django Channels 4.1.0 with WebSocket support
+- **Authentication**: Django REST Knox 5.0.2
+- **Database**: SQLite (development), PostgreSQL (production recommended)
+- **CORS**: django-cors-headers 4.7.0
+
+### Frontend Integration
+- **WebSocket Client**: Real-time communication support
+- **API Endpoints**: RESTful API design
+
+## 📁 Project Structure
+
 ```
-Authorization: Token <your-token-here>
-Content-Type: application/json
+hms-server/
+├── healthManagement/          # Main application module
+│   ├── models.py             # Database models (Patient, Appointment, etc.)
+│   ├── views.py              # API views and business logic
+│   ├── serializers.py        # Data serialization
+│   ├── consumers.py          # WebSocket consumers
+│   ├── urls.py               # URL routing
+│   └── migrations/           # Database migrations
+├── accounts/                  # User authentication and profiles
+├── accountant/               # Financial management module
+├── hmsServer/                # Django project settings
+│   ├── settings.py           # Project configuration
+│   ├── urls.py               # Main URL routing
+│   ├── asgi.py               # ASGI application for WebSockets
+│   └── wsgi.py               # WSGI application
+├── manage.py                 # Django management script
+├── requirements.txt          # Python dependencies
+└── db.sqlite3               # SQLite database (development)
 ```
 
-## Base URL: `http://localhost:8000/api/`
+## 🚀 Quick Start
 
-## 👤 User Profile
+### Prerequisites
+- Python 3.8+
+- pip package manager
+- Virtual environment (recommended)
 
-### `GET /my-info`
-**What it does:** Get your profile information  
-**Who can use:** Everyone  
-**How to use:** Just send GET request  
+### Installation
 
-### `GET /patients`
-**What it does:** Get list of patients in your department  
-**Who can use:** Doctors, nurses  
-**How to use:** Send GET request, optionally add `?department=cardiology`  
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd hms-server
+   ```
 
-### `GET /doctors`
-**What it does:** Get list of all doctors  
-**Who can use:** Everyone  
-**How to use:** Just send GET request
+2. **Create and activate virtual environment**
+   ```bash
+   python -m venv venv
+   
+   # Windows
+   venv\Scripts\activate
+   
+   # Unix/MacOS
+   source venv/bin/activate
+   ```
 
-## 📅 Appointments
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### `POST /patient-book-appointment`
-**What it does:** Book an appointment with a doctor  
-**Who can use:** Patients only  
-**How to use:** Send POST with `{"doctor_id": 2, "appointment_date": "2024-01-15T10:00:00Z", "reason": "checkup"}`  
+4. **Configure environment variables**
+   - Copy `hmsServer/settings.py` and update:
+     - `SECRET_KEY`: Generate a new secure key
+     - `DATABASES`: Configure your database settings
+     - Email settings for notifications
 
-### `GET /patient-appointments`
-**What it does:** Get your appointments  
-**Who can use:** Patients only  
-**How to use:** Send GET request, add `?status=pending` to filter  
+5. **Run database migrations**
+   ```bash
+   python manage.py makemigrations
+   python manage.py migrate
+   ```
 
-### `GET /doctor-appointments`
-**What it does:** Get appointments for you as a doctor  
-**Who can use:** Doctors only  
-**How to use:** Send GET request, add `?from=01-01-2024&to=31-01-2024` to filter dates  
+6. **Create superuser**
+   ```bash
+   python manage.py createsuperuser
+   ```
 
-### `GET /doctor-appointments-today`
-**What it does:** Get today's appointments  
-**Who can use:** Doctors only  
-**How to use:** Just send GET request  
+7. **Start the development server**
+   ```bash
+   python manage.py runserver
+   ```
 
-### `GET /doctor-appointments-not-today`
-**What it does:** Get all appointments except today's  
-**Who can use:** Doctors only  
-**How to use:** Just send GET request  
+8. **Start WebSocket server** (for real-time features)
+   ```bash
+   daphne hmsServer.asgi:application -p 8000
+   ```
 
-### `PATCH /doctor-confirm-appointment/<appointment_id>`
-**What it does:** Confirm a pending appointment  
-**Who can use:** Doctors only  
-**How to use:** Send PATCH to `/doctor-confirm-appointment/123`  
+## 📊 Database Models
 
-### `PATCH /doctor-cancel-appointment/<appointment_id>`
-**What it does:** Cancel an appointment  
-**Who can use:** Doctors only  
-**How to use:** Send PATCH to `/doctor-cancel-appointment/123`  
+### Core Entities
+- **Profile**: User profiles with roles (Doctor, Nurse, Patient, Admin)
+- **Patient**: Patient information and medical history
+- **Appointment**: Appointment scheduling and management
+- **MedicalRecord**: Comprehensive patient medical records
+- **VitalSign**: Patient vital signs monitoring
+- **Treatment**: Medical treatments and procedures
+- **Department**: Hospital departments and specialties
 
-### `GET /nurse-department-appointments`
-**What it does:** Get appointments in your department  
-**Who can use:** Nurses only  
-**How to use:** Just send GET request
+### Hospital Infrastructure
+- **Ward**: Hospital wards organization
+- **Room**: Rooms within wards
+- **Bed**: Individual bed management
+- **Admission**: Patient admission records
+- **SurgeryPlacement**: Surgical scheduling
 
-## 📋 Medical Records
+### Pharmacy & Laboratory
+- **Drug**: Medication inventory
+- **PharmacyReferral**: Pharmacy referral system
+- **TestRequest**: Laboratory test requests
+- **TestResult**: Test results and reports
 
-### `GET /get-patient-emr`
-**What it does:** Get your medical record  
-**Who can use:** Patients (own record only)  
-**How to use:** Just send GET request  
+### Financial
+- **AdmissionCharges**: Admission billing
+- **DrugSale**: Pharmacy sales transactions
+- **ExpenseTransaction**: Expense tracking
+- **IncomeTransaction**: Revenue tracking
 
-### `GET /doc-get-patient-emr/<patient_id>`
-**What it does:** Get a patient's medical record  
-**Who can use:** Doctors, medical staff  
-**How to use:** Send GET to `/doc-get-patient-emr/123`  
+## 🔌 API Endpoints
 
-### `POST /doc-create-patient-emr`
-**What it does:** Create medical record for a patient  
-**Who can use:** Doctors only  
-**How to use:** Send POST with patient details like `{"patient_id": 1, "blood_group": "O+", "height": 165}`  
+The system provides RESTful API endpoints for all major operations:
 
-### `PATCH /patient-emr-update/<patient_id>`
-**What it does:** Update patient's medical record  
-**Who can use:** Doctors only  
-**How to use:** Send PATCH to `/patient-emr-update/123` with updated data  
+### Authentication
+- `/api/auth/login/` - User login
+- `/api/auth/logout/` - User logout
+- `/api/auth/register/` - User registration
 
-## 🩺 Patient Vitals
+### Patient Management
+- `/api/patients/` - Patient CRUD operations
+- `/api/appointments/` - Appointment management
+- `/api/medical-records/` - Medical record access
 
-### `POST /create-patient-vital`
-**What it does:** Record vital signs for a patient  
-**Who can use:** Doctors, nurses (not patients)  
-**How to use:** Send POST with `{"patient_id": 1, "blood_pressure_systolic": 120, "heart_rate": 72}`  
+### Hospital Operations
+- `/api/admissions/` - Patient admissions
+- `/api/departments/` - Department management
+- `/api/beds/` - Bed management
 
-### `PATCH /update-patient-vital/<vital_id>`
-**What it does:** Update existing vital signs  
-**Who can use:** Original recorder or admin  
-**How to use:** Send PATCH to `/update-patient-vital/123` with new data  
+### Pharmacy & Lab
+- `/api/pharmacy/` - Pharmacy operations
+- `/api/laboratory/` - Laboratory services
 
-## 🧪 Lab Tests
+### Financial
+- `/api/accounting/` - Financial operations
 
-### `POST /doctor-test-request`
-**What it does:** Request lab test for patient  
-**Who can use:** Doctors only  
-**How to use:** Send POST with `{"patient_id": 1, "test_name": "Blood Test", "test_code": "BT001"}`  
+## 🔄 WebSocket Events
 
-### `PATCH /update-test/<test_id>`
-**What it does:** Update test results  
-**Who can use:** Lab technicians only  
-**How to use:** Send PATCH to `/update-test/123` with results  
+Real-time features are implemented using Django Channels:
 
-### `GET /get-all-test-result`
-**What it does:** Get all test results  
-**Who can use:** Everyone  
-**How to use:** Just send GET request  
+### Connection Endpoints
+- `ws/notifications/` - Real-time notifications
+- `ws/appointments/` - Appointment updates
+- `ws/admissions/` - Admission status changes
 
-### `GET /get-specific-test-result/<test_id>`
-**What it does:** Get specific test result  
-**Who can use:** Everyone  
-**How to use:** Send GET to `/get-specific-test-result/123`  
+### Events
+- New appointment notifications
+- Admission status updates
+- Laboratory result notifications
+- Pharmacy refill alerts
 
-## 💊 Drug Inventory
+## 🔧 Configuration
 
-### `GET /get-all-drugs`
-**What it does:** Get list of all drugs in inventory  
-**Who can use:** Everyone  
-**How to use:** Just send GET request  
+### Environment Variables
+Create a `.env` file in the project root:
 
-### `GET /get-specific-drug/<drug_id>`
-**What it does:** Get details of specific drug  
-**Who can use:** Everyone  
-**How to use:** Send GET to `/get-specific-drug/123`  
+```env
+SECRET_KEY=your-secret-key-here
+DEBUG=True
+DATABASE_URL=sqlite:///db.sqlite3
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-app-password
+```
 
-### `PATCH /update-a-specific-drug/<drug_id>`
-**What it does:** Update drug information  
-**Who can use:** Pharmacists and admins  
-**How to use:** Send PATCH to `/update-a-specific-drug/123` with new data
+### Database Configuration
+For production, configure PostgreSQL in `hmsServer/settings.py`:
 
-## 💉 Prescriptions
+```python
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'hms_db',
+        'USER': 'hms_user',
+        'PASSWORD': 'your-password',
+        'HOST': 'localhost',
+        'PORT': '5432',
+    }
+}
+```
 
-### `POST /create-prescription`
-**What it does:** Create prescription for patient  
-**Who can use:** Doctors only  
-**How to use:** Send POST with `{"patient_id": 1, "medications": [1,2,3], "instructions": "Take twice daily"}`  
+## 🧪 Testing
 
-### `GET /get-all-prescriptions`
-**What it does:** Get prescriptions (filtered by your role)  
-**Who can use:** Everyone  
-**How to use:** Send GET request, add `?dispensed=true` or `?patient_id=123` to filter  
+Run the test suite:
 
-### `GET /get-patient-prescription/<patient_email>`
-**What it does:** Get prescriptions for specific patient  
-**Who can use:** Patients (own), medical staff (any patient)  
-**How to use:** Send GET to `/get-patient-prescription/patient@email.com`  
+```bash
+# Run all tests
+python manage.py test
 
-### `PATCH /update-prescription/<prescription_id>`
-**What it does:** Update prescription details  
-**Who can use:** Doctors (own), pharmacists, admins  
-**How to use:** Send PATCH to `/update-prescription/123` with new data  
+# Run specific app tests
+python manage.py test healthManagement
+python manage.py test accounts
+python manage.py test accountant
+```
 
-### `POST /pharmacist-dispense-prescription/<prescription_id>`
-**What it does:** Mark prescription as dispensed  
-**Who can use:** Pharmacists only  
-**How to use:** Send POST to `/pharmacist-dispense-prescription/123`  
+## 📝 Development Guidelines
 
-### `POST /patient-collected-prescription/<prescription_id>`
-**What it does:** Confirm you collected prescription  
-**Who can use:** Patients only  
-**How to use:** Send POST to `/patient-collected-prescription/123`
+### Code Style
+- Follow PEP 8 Python style guidelines
+- Use meaningful variable and function names
+- Add docstrings to all functions and classes
+- Maintain proper indentation and spacing
 
-## 🏥 Wards & Rooms
+### API Design
+- Use RESTful principles
+- Implement proper HTTP status codes
+- Validate input data using serializers
+- Handle errors gracefully
 
-### `GET /ward-room-bed-overview`
-**What it does:** Get overview of all wards, rooms and beds  
-**Who can use:** Everyone  
-**How to use:** Just send GET request  
+### Database
+- Use Django migrations for schema changes
+- Add indexes for frequently queried fields
+- Optimize queries to prevent N+1 problems
 
-### `POST /create-ward`
-**What it does:** Create a new ward  
-**Who can use:** Admins only  
-**How to use:** Send POST with `{"name": "ICU", "description": "Intensive Care"}`  
+## 🚀 Deployment
 
-### `PUT /update-ward/<ward_id>`
-**What it does:** Update ward information  
-**Who can use:** Admins only  
-**How to use:** Send PUT to `/update-ward/123` with new data  
+### Production Setup
+1. Set `DEBUG=False` in settings
+2. Configure production database
+3. Set up static files serving
+4. Configure domain and SSL
+5. Set up environment variables
+6. Run migrations and collect static files
 
-### `DELETE /delete-ward/<ward_id>`
-**What it does:** Delete a ward  
-**Who can use:** Admins only  
-**How to use:** Send DELETE to `/delete-ward/123`  
+### Docker Deployment
+```dockerfile
+# Dockerfile example
+FROM python:3.9
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["daphne", "hmsServer.asgi:application", "-p", "8000"]
+```
 
-### `POST /create-room`
-**What it does:** Create room in a ward  
-**Who can use:** Admins only  
-**How to use:** Send POST with `{"ward_id": 1, "number": "R001", "bed_count": 4}`  
+## 🤝 Contributing
 
-### `PUT /update-room/<room_id>`
-**What it does:** Update room information  
-**Who can use:** Admins only  
-**How to use:** Send PUT to `/update-room/123` with new data  
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-### `DELETE /delete-room/<room_id>`
-**What it does:** Delete a room  
-**Who can use:** Admins only  
-**How to use:** Send DELETE to `/delete-room/123`  
+## 📄 License
 
-## 🛏️ Bed Allocation
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-### `POST /allocate-bed`
-**What it does:** Assign bed to patient  
-**Who can use:** Doctors, nurses  
-**How to use:** Send POST with `{"room_id": 1, "bed_number": "B1", "allocated_to_id": 123}`  
+## 🆘 Support
 
-## 🤖 AI Assistant
+For support and questions:
+- Create an issue in the repository
+- Contact the development team
+- Check the documentation
 
-### `POST /ai`
-**What it does:** Chat with AI medical assistant  
-**Who can use:** Doctors only  
-**How to use:** Send POST with `{"message": "What are symptoms of fever?"}`
+## 🔄 Version History
 
-## 🔧 Admin Endpoints
-*All admin endpoints require superuser access*
+- **v1.0.0** - Initial release with core HMS functionality
+- **v1.1.0** - Added WebSocket real-time features
+- **v1.2.0** - Enhanced pharmacy and laboratory modules
+- **v1.3.0** - Improved accounting and billing system
 
-### User Management
-- `GET/POST /admin/users/` - List all users or create new user
-- `GET/PUT/DELETE /admin/users/<user_id>/` - Get, update, or deactivate user
+## 📈 Future Enhancements
 
-### Department Management  
-- `GET/POST /admin/departments/` - List or create departments
-- `GET/PUT/DELETE /admin/departments/<dept_id>/` - Manage specific department
+- Mobile application support
+- Advanced analytics and reporting
+- Integration with medical devices
+- Telemedicine capabilities
+- AI-powered diagnostics assistance
+- Multi-hospital support
+- Enhanced security features
 
-### Analytics
-- `GET /admin/analytics/overview/` - Get system statistics
-- `GET /admin/analytics/patients/` - Get patient analytics  
-- `GET /admin/analytics/appointments/` - Get appointment analytics
+---
 
-### Drug Management
-- `GET/POST /admin/drugs/` - List or create drugs
-- `GET/PUT/DELETE /admin/drugs/<drug_id>/` - Manage specific drug
-- `GET /admin/drugs/low-stock/` - Get low stock drugs
-
-### System Overview
-- `GET /admin/prescriptions/` - All prescriptions with filters
-- `GET /admin/test-results/` - All test results  
-- `GET /admin/appointments/` - All appointments with filters
-- `GET /admin/wards/` - All wards with details
-- `GET /admin/rooms/` - All rooms with details
-- `GET /admin/beds/` - All beds with filters
-- `GET /admin/roles/` - All user roles
-
-## 📝 Quick Notes
-- All endpoints need `Authorization: Token <your-token>` header
-- Use `Content-Type: application/json` for POST/PUT requests
-- Add `?` followed by parameters for filtering (e.g., `?status=pending`)
-- Replace `<id>` in URLs with actual numbers (e.g., `/users/123/`)
-- Dates should be in format: `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SSZ`
-
-## 🔐 Common Error Codes
-- `400` - Bad Request (validation errors)
-- `401` - Unauthorized (need authentication)  
-- `403` - Forbidden (no permission)
-- `404` - Not Found (doesn't exist)
-- `500` - Server Error
+**Built with ❤️ for healthcare professionals**

@@ -1,10 +1,12 @@
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_save
+from django.db import transaction
 from django.dispatch import receiver
 from accounts.models import CustomUser
 from .models import *
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
+from django.db.models import Count
 
 @receiver(post_save, sender=CustomUser)
 def create_user_profile(sender, instance, created, **kwargs):
@@ -440,6 +442,85 @@ def send_refresh_appointment_action(users, appointment_id):
         # Get the channel layer
         channel_layer = get_channel_layer()
         
+        for user in users:
+            if not isinstance(user, CustomUser):
+                continue
+                
+            # Send refresh action to user's WebSocket group
+            safe_email = user.email.replace('@', '_').replace('.', '_')
+            async_to_sync(channel_layer.group_send)(
+                f"user_{safe_email}",
+                {
+                    "type": "send_message",
+                    "message": {
+                        "type": "action",
+                        "action": "get_appointment_detail",
+                        "appointment_id": str(appointment_id)
+                    }
+                }
+            )
+    except Exception as e:
+        print(f"Error sending refresh appointment action: {str(e)}")
+
+
+@receiver(post_save, sender=Room)
+def create_room_beds(sender, instance, created, **kwargs):
+    """
+    Automatically create or update beds when a room is created or updated.
+    Creates new beds if bed_count is increased, deletes excess beds if decreased.
+    """
+    if created:
+        # If it's a new room, create the specified number of beds
+        with transaction.atomic():
+            for i in range(1, instance.bed_count + 1):
+                Bed.objects.create(
+                    room=instance,
+                    is_occupied=False,
+                    created_at=timezone.now()
+                )
+    else:
+        # If it's an update, check if bed_count has changed
+        try:
+            old_instance = Room.objects.get(pk=instance.pk)
+            if old_instance.bed_count != instance.bed_count:
+                with transaction.atomic():
+                    current_bed_count = instance.beds.count()
+                    occupied_beds = instance.beds.filter(is_occupied=True).count()
+                    
+                    # Ensure we don't set bed count below number of occupied beds
+                    if instance.bed_count < occupied_beds:
+                        raise ValidationError(
+                            f"Cannot reduce bed count to {instance.bed_count} "
+                            f"because there are {occupied_beds} occupied beds."
+                        )
+                    
+                    if instance.bed_count > current_bed_count:
+                        # Add new beds
+                        for i in range(current_bed_count + 1, instance.bed_count + 1):
+                            Bed.objects.create(
+                                room=instance,
+                                is_occupied=False,
+                                created_at=timezone.now()
+                            )
+                    elif instance.bed_count < current_bed_count:
+                        # Remove excess unoccupied beds
+                        excess_beds = instance.beds.filter(is_occupied=False)[:current_bed_count - instance.bed_count]
+                        excess_beds.delete()
+        except Room.DoesNotExist:
+            # Handle case where the room was just created in a different process
+            pass
+    """
+    Helper function to trigger get_appointment_detail action for users via WebSocket
+    This prompts the client to fetch the updated appointment data
+    
+    Args:
+        users: List of users to send the action to
+        appointment_id: ID of the appointment to refresh
+    """
+    try:
+        # Get the channel layer
+        channel_layer = get_channel_layer()
+        
         # Send to all specified users
         for user in users:
             # Check if user has an active WebSocket connection
@@ -464,3 +545,55 @@ def send_refresh_appointment_action(users, appointment_id):
                 )
     except Exception as e:
         print(f"Error sending refresh appointment action via WebSocket: {str(e)}")
+
+
+@receiver(post_save, sender=DrugSale)
+def update_drug_quantities_on_payment(sender, instance, created, **kwargs):
+    """
+    Subtract drug quantities when DrugSale payment status changes to 'paid'
+    """
+    print(f"DrugSale signal triggered - created: {created}, payment_status: {instance.payment_status}, amount_paid: {instance.amount_paid}, total_amount: {instance.total_amount}")
+    
+    # Check if this is an update (not creation) and payment status is now 'paid'
+    if not created and instance.payment_status == 'paid':
+        print("Payment status is 'paid' and this is an update, checking update_fields...")
+        
+        # Use update_fields to check if payment_status was actually updated
+        update_fields = kwargs.get('update_fields')
+        print(f"Update fields: {update_fields}")
+        
+        if update_fields is None or 'payment_status' in update_fields or 'amount_paid' in update_fields:
+            print("Proceeding with drug quantity update...")
+            try:
+                with transaction.atomic():
+                    # Find related ReferralDispensedDrugItem through BulkSaleId
+                    if instance.sales_id:
+                        referral_items = ReferralDispensedDrugItem.objects.filter(
+                            bulk_sale_id=instance.sales_id
+                        )
+                        
+                        print(f"Processing payment for DrugSale {instance.id}, found {referral_items.count()} items")
+                        
+                        for item in referral_items:
+                            # Subtract the number_of_cards from the drug quantity
+                            drug = item.drug
+                            if drug.quantity >= item.number_of_cards:
+                                drug.quantity -= item.number_of_cards
+                                drug.save(update_fields=['quantity'])
+                                print(f"Reduced {drug.name} quantity by {item.number_of_cards}, new quantity: {drug.quantity}")
+                            else:
+                                # Handle insufficient quantity - could raise an error or log warning
+                                print(f"Warning: Insufficient quantity for drug {drug.name}. "
+                                      f"Available: {drug.quantity}, Required: {item.number_of_cards}")
+                    else:
+                        print("No sales_id found for this DrugSale")
+                                
+            except Exception as e:
+                print(f"Error updating drug quantities on payment: {str(e)}")
+        else:
+            print("Update fields check failed - not processing")
+    else:
+        if created:
+            print("This is a new DrugSale creation - not processing")
+        else:
+            print(f"Payment status is not 'paid': {instance.payment_status}")

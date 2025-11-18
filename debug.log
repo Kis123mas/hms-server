@@ -1,0 +1,7 @@
+Watching for file changes with StatReloader
+WebSocket HANDSHAKING /ws/connect/ [127.0.0.1:59328]
+WebSocket CONNECT /ws/connect/ [127.0.0.1:59328]
+WebSocket DISCONNECT /ws/connect/ [127.0.0.1:59328]
+WebSocket HANDSHAKING /ws/connect/ [127.0.0.1:56410]
+WebSocket CONNECT /ws/connect/ [127.0.0.1:56410]
+C:\Users\kismas\Documents\hospital management system\hms-server\hmsServer\settings.py changed, reloading.

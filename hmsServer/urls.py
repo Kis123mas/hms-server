@@ -25,6 +25,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/accounts/', include('accounts.urls')),
     path('api/hms/', include('healthManagement.urls')),
+    path('api/accountant/', include('accountant.urls')),
 ]
 
 # Serve media files during development

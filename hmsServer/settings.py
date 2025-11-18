@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     # added applications
     'accounts',
     'healthManagement',
+    'accountant',
 ]
 
 REST_FRAMEWORK = {
