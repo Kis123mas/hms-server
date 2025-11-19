@@ -73,10 +73,8 @@ def register_api(request):
             VerificationCode.objects.create(user=user, code=code)
 
             # Send professional verification email
-            email_sent = send_verification_email(user, code)
             
-            if not email_sent:
-                print("[WARNING] Email could not be sent, but user was created successfully")
+            send_verification_email(user, code)
 
             return Response({
                 'status': 'success',
@@ -218,23 +216,13 @@ def regenerate_code_api(request):
     # Send email using email_utils
     try:
         from email_utils import send_verification_email
-        email_sent = send_verification_email(user, code)
-        
-        if not email_sent:
-            print("[WARNING] Email could not be sent, but code was generated")
-            # Still return success since the code is generated and stored
-            return Response({
-                'status': 'success',
-                'message': 'A new verification code has been generated. Please note that email delivery may be delayed.'
-            }, status=status.HTTP_200_OK)
-            
+        send_verification_email(user, code)
     except Exception as e:
         print(f"[EMAIL ERROR] Could not send new verification email: {e}")
-        # Don't return error, just warn the user
         return Response({
-            'status': 'success',
-            'message': 'A new verification code has been generated. Please note that email delivery may be delayed.'
-        }, status=status.HTTP_200_OK)
+            'status': 'error',
+            'message': 'Failed to send verification email. Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     return Response({
         'status': 'success',

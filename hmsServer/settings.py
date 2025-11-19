@@ -14,6 +14,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 import os
 from pathlib import Path
 import certifi
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -114,10 +118,14 @@ ASGI_APPLICATION = 'hmsServer.asgi.application'
 
 # Channel layers configuration for WebSocket
 CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer'
-    }
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [os.environ["REDIS_URL"]],
+        },
+    },
 }
+print("Redis channel layer configured successfully")
 
 
 # Database
@@ -173,34 +181,17 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 
-# Email backend configuration
-# Use environment variables for production, fallback to console backend if SMTP fails
-import os
+# Email backend for Gmail SMTP (real email sending)
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
-# Try to use SMTP backend, fallback to console if network issues
-if os.environ.get('RAILWAY_ENVIRONMENT') or not DEBUG:
-    # Production environment - try SMTP first
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
-    EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
-    EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'mediplex4@gmail.com')
-    EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', 'klvzoeweeislyrxe')
-    EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() == 'true'
-    EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'False').lower() == 'true'
-    DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
-    
-    # Fallback to console backend if SMTP fails
-    # This will be caught in the email_utils.py send_verification_email function
-else:
-    # Development environment
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    EMAIL_HOST = 'smtp.gmail.com'
-    EMAIL_PORT = 587
-    EMAIL_HOST_USER = 'mediplex4@gmail.com'
-    EMAIL_HOST_PASSWORD = 'klvzoeweeislyrxe'
-    EMAIL_USE_TLS = True
-    EMAIL_USE_SSL = False
-    DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_HOST = os.getenv("EMAIL_HOST")
+EMAIL_PORT = os.getenv("EMAIL_PORT")
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS")
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL")
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 
 # Default primary key field type
