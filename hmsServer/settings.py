@@ -36,6 +36,7 @@ ALLOWED_HOSTS = ['*']
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "https://new-client-hms.vercel.app",
 ]
 
 
@@ -172,17 +173,34 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 
-# Email backend for Gmail SMTP (real email sending)
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# Email backend configuration
+# Use environment variables for production, fallback to console backend if SMTP fails
+import os
 
-# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_HOST_USER = 'mediplex4@gmail.com'
-EMAIL_HOST_PASSWORD = 'klvzoeweeislyrxe'
-EMAIL_USE_TLS = True
-EMAIL_USE_SSL = False
-DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+# Try to use SMTP backend, fallback to console if network issues
+if os.environ.get('RAILWAY_ENVIRONMENT') or not DEBUG:
+    # Production environment - try SMTP first
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+    EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+    EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'mediplex4@gmail.com')
+    EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', 'klvzoeweeislyrxe')
+    EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() == 'true'
+    EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'False').lower() == 'true'
+    DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+    
+    # Fallback to console backend if SMTP fails
+    # This will be caught in the email_utils.py send_verification_email function
+else:
+    # Development environment
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = 'smtp.gmail.com'
+    EMAIL_PORT = 587
+    EMAIL_HOST_USER = 'mediplex4@gmail.com'
+    EMAIL_HOST_PASSWORD = 'klvzoeweeislyrxe'
+    EMAIL_USE_TLS = True
+    EMAIL_USE_SSL = False
+    DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 
 # Default primary key field type

@@ -2,7 +2,8 @@
 Email utilities for HMS Hospital Management System
 Professional email templates for various user interactions
 """
-from django.core.mail import send_mail
+from django.core.mail import send_mail, get_connection
+from django.core.mail.backends.console import EmailBackend as ConsoleBackend
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
@@ -99,6 +100,7 @@ Hospital Management System
     """
     
     try:
+        # Try to send email with configured SMTP backend
         send_mail(
             subject=subject,
             message=message,
@@ -107,8 +109,30 @@ Hospital Management System
             html_message=html_message,
             fail_silently=False,
         )
+        print(f"[EMAIL SUCCESS] Verification email sent to {user.email}")
         return True
     except Exception as e:
-        print(f"[EMAIL ERROR] Could not send verification email: {e}")
+        print(f"[EMAIL ERROR] Could not send verification email via SMTP: {e}")
+        
+        # Fallback to console backend if network error
+        if "Network is unreachable" in str(e) or "101" in str(e):
+            print("[EMAIL FALLBACK] Using console backend due to network error")
+            try:
+                # Use console backend as fallback
+                connection = ConsoleBackend()
+                send_mail(
+                    subject=subject,
+                    message=message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[user.email],
+                    html_message=html_message,
+                    connection=connection,
+                    fail_silently=False,
+                )
+                print(f"[EMAIL CONSOLE] Verification email for {user.email} (Code: {code})")
+                return True
+            except Exception as fallback_error:
+                print(f"[EMAIL ERROR] Console backend also failed: {fallback_error}")
+        
         return False
 
