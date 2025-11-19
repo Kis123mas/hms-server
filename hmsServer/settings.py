@@ -39,6 +39,14 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 
+CSRF_TRUSTED_ORIGINS = [
+    'https://hms-server-production.up.railway.app',
+]
+
+
+CORS_ALLOW_CREDENTIALS = True
+
+
 
 # Application definition
 
