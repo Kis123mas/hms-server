@@ -16,6 +16,39 @@ from django.contrib.auth import get_user_model
 
 APPLICATIONS_USER_MODEL = get_user_model()
 
+
+class ChatRequestSerializer(serializers.Serializer):
+    message = serializers.CharField(max_length=1000, required=True)
+    conversation_history = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        allow_empty=True
+    )
+
+
+class ChatResponseSerializer(serializers.Serializer):
+    response = serializers.CharField()
+    conversation_id = serializers.CharField(required=False)
+
+
+class TestTypesSerializer(serializers.ModelSerializer):
+    """
+    Serializer for TestTypes model
+    """
+    class Meta:
+        model = TestTypes
+        fields = ['id', 'name', 'description', 'price']
+
+
+class PaymentMethodSerializer(serializers.ModelSerializer):
+    """
+    Serializer for PaymentMethod model
+    """
+    class Meta:
+        model = PaymentMethod
+        fields = ['id', 'name', 'account_number', 'bank', 'account_name']
+
+
 class AdmissionSerializer(serializers.ModelSerializer):
     """
     Serializer for Admission model
@@ -1346,15 +1379,15 @@ class TestRequestListSerializer(serializers.ModelSerializer):
     doctor_name = serializers.SerializerMethodField()
     lab_technician_name = serializers.SerializerMethodField()
     status_display = serializers.CharField(source='get_status_display')
-    test_type_display = serializers.CharField(source='get_test_type_display')
+    test_type = TestTypesSerializer(read_only=True)
     
     class Meta:
         model = TestRequest
         fields = [
-            'id', 'test_type', 'test_type_display', 'test_name', 'status', 'status_display',
+            'id', 'test_type', 'test_name', 'status', 'status_display',
             'notes', 'created_at', 'updated_at', 'patient_name', 'doctor_name',
             'lab_technician_name', 'customers_name', 'customers_phone', 'customers_email',
-            'requested_by', 'is_payment_done', 'payment_received_by', 'payment_method', 'status' # Added this line
+            'requested_by', 'is_payment_done', 'payment_received_by', 'payment_method', 'status'
         ]
         read_only_fields = fields
     
@@ -2094,12 +2127,16 @@ class PharmacyDispenseUpdateSerializer(serializers.ModelSerializer):
 
 
 class PharmacyReferralPaymentUpdateSerializer(serializers.ModelSerializer):
+    # Map frontend camelCase to backend snake_case
+    amountPaid = serializers.CharField(source='amount_paid', required=False)
+    paymentMethod = serializers.IntegerField(source='payment_method', required=False)
+    
     class Meta:
         model = PharmacyReferral
-        fields = ['amount_paid', 'mode_of_payment', 'payment_received_by', 'is_payment_done']
+        fields = ['amountPaid', 'paymentMethod', 'payment_received_by', 'is_payment_done']
         read_only_fields = ['payment_received_by', 'is_payment_done']
     
-    def validate_amount_paid(self, value):
+    def validate_amountPaid(self, value):
         try:
             amount = float(value)
             if amount < 0:
@@ -2108,11 +2145,17 @@ class PharmacyReferralPaymentUpdateSerializer(serializers.ModelSerializer):
         except (ValueError, TypeError):
             raise serializers.ValidationError("Please enter a valid amount")
     
-    def validate_mode_of_payment(self, value):
-        valid_methods = dict(PharmacyReferral.PAYMENT_METHODS).keys()
-        if value not in valid_methods:
-            raise serializers.ValidationError(f"Invalid payment method. Must be one of: {', '.join(valid_methods)}")
-        return value
+    def validate_paymentMethod(self, value):
+        from .models import PaymentMethod
+        # If value is already a PaymentMethod object, return it
+        if isinstance(value, PaymentMethod):
+            return value
+        # If value is an ID (string or number), get the PaymentMethod object
+        try:
+            payment_method = PaymentMethod.objects.get(id=int(value))
+            return payment_method
+        except (PaymentMethod.DoesNotExist, TypeError, ValueError):
+            raise serializers.ValidationError("Invalid payment method")
     
     def update(self, instance, validated_data):
         # Check if payment is being marked as done for the first time
@@ -2381,9 +2424,6 @@ class DrugSaleDetailSerializer(serializers.ModelSerializer):
         } for item in dispensed_items]
 
 
-
-
-
 class TestRequestPaymentUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestRequest
@@ -2396,10 +2436,16 @@ class TestRequestPaymentUpdateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_payment_method(self, value):
-        if value not in dict(TestRequest.PAYMENT_METHODS).keys():
+        from .models import PaymentMethod
+        # If value is already a PaymentMethod object, return it
+        if isinstance(value, PaymentMethod):
+            return value
+        # If value is an ID, get the PaymentMethod object
+        try:
+            payment_method = PaymentMethod.objects.get(id=value)
+            return payment_method
+        except (PaymentMethod.DoesNotExist, TypeError, ValueError):
             raise serializers.ValidationError("Invalid payment method")
-        return value
-
 
 
 class DrugSalePaymentUpdateSerializer(serializers.ModelSerializer):
@@ -2411,7 +2457,18 @@ class DrugSalePaymentUpdateSerializer(serializers.ModelSerializer):
             'payment_method': {'required': True},
             'payment_reference': {'required': False}
         }
-
+    
+    def validate_payment_method(self, value):
+        from .models import PaymentMethod
+        # If value is already a PaymentMethod object, return it
+        if isinstance(value, PaymentMethod):
+            return value
+        # If value is an ID, get the PaymentMethod object
+        try:
+            payment_method = PaymentMethod.objects.get(id=value)
+            return payment_method
+        except (PaymentMethod.DoesNotExist, TypeError, ValueError):
+            raise serializers.ValidationError("Invalid payment method")
 
 
 class AdmissionChargesSerializer(serializers.ModelSerializer):

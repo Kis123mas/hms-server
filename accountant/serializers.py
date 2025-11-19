@@ -320,3 +320,27 @@ class DrugSerializer(serializers.ModelSerializer):
         if value is not None and value < 0:
             raise serializers.ValidationError("Price cannot be negative.")
         return value
+
+
+class ActivitySerializer(serializers.ModelSerializer):
+    """
+    Serializer for Activity model
+    """
+    action_taken_by = UserSerializer(read_only=True)
+    action_taken_on = UserSerializer(read_only=True)
+    action_display = serializers.CharField(source='get_action_display', read_only=True)
+    
+    class Meta:
+        model = Activity
+        fields = [
+            'id',
+            'action_taken_by',
+            'action_taken_on',
+            'action',
+            'action_display',
+            'model_name',
+            'object_id',
+            'description',
+            'timestamp'
+        ]
+        read_only_fields = ['id', 'timestamp']

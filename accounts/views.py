@@ -8,6 +8,7 @@ from knox.auth import TokenAuthentication
 from django.contrib.auth import logout
 from healthManagement.models import VerificationCode
 import random
+from email_utils import send_verification_email
 
 
 # external package import
@@ -71,21 +72,9 @@ def register_api(request):
             # Store it in the database for later verification
             VerificationCode.objects.create(user=user, code=code)
 
-            from django.core.mail import send_mail
-            try:
-                # Send email
-                subject = "Verify your account"
-                message = f"Hello {user.first_name},\n\nYour verification code is: {code}\n\nEnter this code in the app to activate your account and This code will expire in 60 seconds"
-                send_mail(
-                    subject,
-                    message,
-                    None,  # will use DEFAULT_FROM_EMAIL
-                    [user.email],
-                    fail_silently=True,  # Changed to True to prevent crashing
-                )
-            except Exception as e:
-                # Log the error but don't block the registration process
-                print(f"[EMAIL ERROR] Could not send verification email: {e}")
+            # Send professional verification email
+            
+            send_verification_email(user, code)
 
             return Response({
                 'status': 'success',
@@ -224,18 +213,10 @@ def regenerate_code_api(request):
     code = f"{random.randint(100000, 999999)}"
     VerificationCode.objects.create(user=user, code=code)
 
-    # Send email
-    from django.core.mail import send_mail
+    # Send email using email_utils
     try:
-        subject = "New Verification Code"
-        message = f"Hello {user.first_name},\n\nYour new verification code is: {code}\n\nThis code will expire in 60 seconds."
-        send_mail(
-            subject,
-            message,
-            None,
-            [user.email],
-            fail_silently=False,
-        )
+        from email_utils import send_verification_email
+        send_verification_email(user, code)
     except Exception as e:
         print(f"[EMAIL ERROR] Could not send new verification email: {e}")
         return Response({

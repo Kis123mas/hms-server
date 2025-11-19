@@ -308,6 +308,7 @@ class MedicalRecord(models.Model):
 
 
 
+
 class Treatment(models.Model):
     """
     Tracks individual treatments prescribed to a patient as part of a medical record.
@@ -1232,52 +1233,5 @@ class DoctorVisit(models.Model):
 
     def __str__(self):
         return self.doctor.email
-
-
-class Activity(models.Model):
-    """
-    Tracks all actions performed across healthManagement and accountant apps
-    """
-    ACTION_CHOICES = [
-        ('create', 'Created'),
-        ('update', 'Updated'),
-        ('delete', 'Deleted'),
-    ]
-
-    action_taken_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='actions_taken'
-    )
-    
-    action_taken_on = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='actions_received'
-    )
-    
-    action = models.CharField(
-        max_length=10,
-        choices=ACTION_CHOICES
-    )
-    
-    model_name = models.CharField(max_length=100)
-    object_id = models.PositiveIntegerField(null=True, blank=True)
-    description = models.TextField()
-    timestamp = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['-timestamp']
-
-    def __str__(self):
-        actor = f"{self.action_taken_by}" if self.action_taken_by else "System"
-        receiver = f" on {self.action_taken_on}" if self.action_taken_on else ""
-        return f"{actor} - {self.get_action_display()} {self.model_name}{receiver}"
-    
-
 
 

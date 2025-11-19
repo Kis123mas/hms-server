@@ -14,6 +14,23 @@ from django.contrib.auth.models import Group
 from django.utils import timezone
 from healthManagement.models import *
 
+# Activity tracking helper function
+def track_user_action(user, action, model_name, object_id=None, action_taken_on=None, description=""):
+    """
+    Helper function to track user actions
+    """
+    try:
+        Activity.objects.create(
+            action_taken_by=user,
+            action_taken_on=action_taken_on,
+            action=action,
+            model_name=model_name,
+            object_id=object_id,
+            description=description
+        )
+    except Exception as e:
+        print(f"Error tracking activity: {str(e)}")
+
 @api_view(['GET'])
 @authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
@@ -22,6 +39,14 @@ def income_list(request):
     Simple function-based view to list all income records
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Income',
+            description=f"Accountant {request.user.email} viewed income records list"
+        )
+        
         # Get all income records ordered by most recent first
         incomes = Income.objects.all().order_by('-created_at')
         
@@ -59,6 +84,14 @@ def expense_list(request):
     Get a list of all expense records
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Expense',
+            description=f"Accountant {request.user.email} viewed expense records list"
+        )
+        
         # Get all expenses ordered by most recent first
         expenses = Expense.objects.all().order_by('-date', '-created_at')
         serializer = ExpenseSerializer(expenses, many=True)
@@ -115,6 +148,15 @@ def create_expense(request):
             
         expense = serializer.save()
         print(f"Expense created successfully. ID: {expense.id}")
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='create',
+            model_name='Expense',
+            object_id=expense.id,
+            description=f"Accountant {request.user.email} created expense record: {expense.reason}, amount: {expense.amount}"
+        )
         
         response_serializer = ExpenseSerializer(expense)
         return Response({
@@ -186,6 +228,14 @@ def financial_summary(request):
     Get financial summary for all time periods (daily, weekly, monthly, yearly)
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='FinancialSummary',
+            description=f"Accountant {request.user.email} viewed financial summary report"
+        )
+        
         # Get data for all periods
         periods = ['daily', 'weekly', 'monthly', 'yearly']
         data = {period: get_period_summary(period) for period in periods}
@@ -299,6 +349,15 @@ def create_room(request):
             ward_id=ward_id
         )
         
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='create',
+            model_name='Room',
+            object_id=room.id,
+            description=f"Admin {request.user.email} created room '{room.name}' with {bed_count} beds in ward {room.ward.name}"
+        )
+        
         return Response(
             {
                 'status': 'success',
@@ -341,6 +400,14 @@ def non_superuser_list(request):
     Get a list of all non-superuser users
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='User',
+            description=f"Admin {request.user.email} viewed list of non-superuser users"
+        )
+        
         # Get all non-superuser users
         users = APPLICATIONS_USER_MODEL.objects.filter(is_superuser=False).order_by('first_name', 'last_name')
         
@@ -373,6 +440,16 @@ def user_profile_detail(request, user_id):
         user = APPLICATIONS_USER_MODEL.objects.get(
             id=user_id,
             is_superuser=False
+        )
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='User',
+            object_id=user.id,
+            action_taken_on=user,
+            description=f"Admin {request.user.email} viewed profile details for user {user.email}"
         )
         
         # Serialize the data
@@ -411,6 +488,14 @@ def list_roles(request):
                 {'status': 'error', 'message': 'You do not have permission to view roles'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Role',
+            description=f"Admin {request.user.email} viewed list of available roles"
+        )
         
         # Get all groups and serialize them
         roles = Group.objects.all().values('id', 'name').order_by('name')
@@ -462,10 +547,20 @@ def update_user_role(request, user_id):
         )
         
         if serializer.is_valid():
-            serializer.save()
+            updated_user = serializer.save()
+            
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='update',
+                model_name='User',
+                object_id=user.id,
+                action_taken_on=user,
+                description=f"Admin {request.user.email} updated role for user {user.email} to {user.role.name if user.role else 'None'}"
+            )
             
             # Return the updated user data
-            user_serializer = UserProfileSerializer(user, context={'request': request})
+            user_serializer = UserProfileSerializer(updated_user, context={'request': request})
             return Response({
                 'status': 'success',
                 'message': 'User role updated successfully',
@@ -509,6 +604,14 @@ def list_appointments(request):
                 status=status.HTTP_403_FORBIDDEN
             )
         
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Appointment',
+            description=f"Admin {request.user.email} viewed list of all appointments"
+        )
+        
         # Get all appointments ordered by date and time
         appointments = Appointment.objects.select_related('patient', 'doctor').order_by('-appointment_date')
         
@@ -549,6 +652,14 @@ def statistics_summary(request):
                 {'status': 'error', 'message': 'You do not have permission to view statistics'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Statistics',
+            description=f"Admin {request.user.email} viewed hospital statistics summary"
+        )
         
         # Count users by role
         patient_count = APPLICATIONS_USER_MODEL.objects.filter(role__name='patient', is_active=True).count()
@@ -602,6 +713,14 @@ def admission_discharge_statistics(request):
                 {'status': 'error', 'message': 'You do not have permission to view statistics'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Statistics',
+            description=f"Admin {request.user.email} viewed admission/discharge statistics"
+        )
         
         # Get current date
         now = timezone.now()
@@ -735,6 +854,14 @@ def bed_occupancy_details(request):
                 {'status': 'error', 'message': 'You do not have permission to view statistics'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='BedOccupancy',
+            description=f"Admin {request.user.email} viewed bed occupancy details"
+        )
         
         # Get all beds with related data
         beds = Bed.objects.select_related('room__ward', 'patient').all()
@@ -903,6 +1030,14 @@ def get_all_wards(request):
                 status=status.HTTP_403_FORBIDDEN
             )
         
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Ward',
+            description=f"Admin {request.user.email} viewed list of all wards"
+        )
+        
         # Get all wards
         wards = Ward.objects.all().order_by('name')
         
@@ -962,6 +1097,15 @@ def create_ward(request):
             description=description
         )
         
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='create',
+            model_name='Ward',
+            object_id=ward.id,
+            description=f"Admin {request.user.email} created ward '{ward.name}'"
+        )
+        
         return Response(
             {
                 'status': 'success',
@@ -997,6 +1141,14 @@ def get_all_wards(request):
                 {'status': 'error', 'message': 'You do not have permission to view wards'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Ward',
+            description=f"Admin {request.user.email} viewed list of all wards"
+        )
         
         # Get all wards
         wards = Ward.objects.all().order_by('name')
@@ -1037,6 +1189,16 @@ def create_drug(request):
         serializer = DrugSerializer(data=request.data)
         if serializer.is_valid():
             drug = serializer.save()
+            
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='create',
+                model_name='Drug',
+                object_id=drug.id,
+                description=f"Admin {request.user.email} created drug '{drug.name}'"
+            )
+            
             return Response({
                 'status': 'success',
                 'data': DrugSerializer(drug).data,
@@ -1085,10 +1247,20 @@ def update_drug(request, drug_id):
         print(f"DEBUG: Update drug request data: {request.data}")
         print(f"DEBUG: Drug before update: {drug}")
         if serializer.is_valid():
-            drug = serializer.save()
+            updated_drug = serializer.save()
+            
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='update',
+                model_name='Drug',
+                object_id=drug.id,
+                description=f"Admin {request.user.email} updated drug '{updated_drug.name}'"
+            )
+            
             return Response({
                 'status': 'success',
-                'data': DrugSerializer(drug).data,
+                'data': DrugSerializer(updated_drug).data,
                 'message': 'Drug updated successfully.'
             }, status=status.HTTP_200_OK)
         else:
@@ -1099,6 +1271,33 @@ def update_drug(request, drug_id):
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
             
+    except Exception as e:
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_all_activities(request):
+    """
+    Get all activities
+    """
+    try:
+        activities = Activity.objects.all().order_by('-timestamp')
+        serializer = ActivitySerializer(activities, many=True)
+        
+        return Response({
+            'status': 'success',
+            'count': len(serializer.data),
+            'activities': serializer.data
+        }, status=status.HTTP_200_OK)
+        
     except Exception as e:
         return Response(
             {'status': 'error', 'message': str(e)},

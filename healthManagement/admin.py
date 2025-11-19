@@ -27,7 +27,7 @@ admin.site.register(BulkSaleId),
 admin.site.register(ReferralDispensedDrugItem),
 admin.site.register(AdmissionCharges),
 admin.site.register(Admission),
+admin.site.register(TestTypes),
 admin.site.register(PaymentMethod),
 admin.site.register(AdmissionChargeCategory),
-admin.site.register(Activity),
 

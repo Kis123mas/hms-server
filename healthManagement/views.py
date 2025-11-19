@@ -14,7 +14,7 @@ from django.core.mail import send_mail
 from django.shortcuts import get_object_or_404
 from django.db.models import Prefetch
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
-from accountant.models import Income
+from accountant.models import *
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
@@ -24,9 +24,30 @@ from rest_framework.exceptions import ValidationError
 from datetime import datetime, date
 from django.utils import timezone
 from utils import APPLICATIONS_USER_MODEL
-from .serializers import DrugSaleSerializer, DrugSaleListSerializer, DrugSaleDetailSerializer, AdmissionChargesSerializer, AdmissionWithChargesSerializer, AdmissionChargeUpdateSerializer, AdmissionChargeCreateSerializer
-from .models import DrugSale, ReferralDispensedDrugItem, AdmissionCharges, Admission
+from .serializers import * 
+from .models import *
 from django.db.models import Prefetch
+from django.conf import settings
+from openai import OpenAI
+import uuid
+from .serializers import ChatRequestSerializer, ChatResponseSerializer, TestTypesSerializer
+
+
+def track_user_action(user, action, model_name, object_id=None, action_taken_on=None, description=""):
+    """
+    Helper function to track user actions
+    """
+    try:
+        Activity.objects.create(
+            action_taken_by=user,
+            action_taken_on=action_taken_on,
+            action=action,
+            model_name=model_name,
+            object_id=object_id,
+            description=description
+        )
+    except Exception as e:
+        print(f"Error tracking activity: {str(e)}")
 
 
 @api_view(['GET'])
@@ -39,6 +60,16 @@ def get_my_profile(request):
     - Works for all user types (patients, doctors, staff)
     """
     user = request.user
+    
+    # Track user action
+    track_user_action(
+        user=user,
+        action='read',
+        model_name='UserProfile',
+        object_id=user.id,
+        description=f"User {user.email} viewed their profile"
+    )
+    
     serializer = UserProfileSerializer(user, context={'request': request})
     
     return Response({
@@ -75,6 +106,15 @@ def update_profile(request):
     if serializer.is_valid():
         serializer.save()
         
+        # Track user action
+        track_user_action(
+            user=user,
+            action='update',
+            model_name='Profile',
+            object_id=profile.id,
+            description=f"User {user.email} updated their profile"
+        )
+        
         # Return updated user profile
         user_serializer = UserProfileSerializer(user, context={'request': request})
         
@@ -103,6 +143,14 @@ def get_departments(request):
     Get all departments
     Requires authentication via Token
     """
+    # Track user action
+    track_user_action(
+        user=request.user,
+        action='read',
+        model_name='Department',
+        description=f"User {request.user.email} viewed departments list"
+    )
+    
     departments = Department.objects.all().order_by('name')
     serializer = DepartmentSerializer(departments, many=True)
     return Response({
@@ -134,6 +182,16 @@ def patient_book_appointment(request):
     if serializer.is_valid():
         appointment = serializer.save()
         
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='create',
+            model_name='Appointment',
+            object_id=appointment.id,
+            action_taken_on=appointment.doctor,
+            description=f"Patient {request.user.email} booked appointment with Dr. {appointment.doctor.first_name} on {appointment.appointment_date}"
+        )
+        
         return Response({
             'status': 'success',
             'message': 'Appointment booked successfully.',
@@ -160,6 +218,14 @@ def get_doctors(request):
     - department: Filter by department name
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='User',
+            description=f"User {request.user.email} viewed doctors list"
+        )
+        
         # Get all users with role 'doctor'
         doctors = get_user_model().objects.filter(role__name='doctor', is_active=True)
         
@@ -208,6 +274,14 @@ def get_user_admissions(request):
     Returns admission history with detailed information
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Admission',
+            description=f"Patient {request.user.email} viewed their admissions history"
+        )
+        
         # Get all admissions for the current user
         admissions = Admission.objects.filter(
             patient=request.user
@@ -263,6 +337,14 @@ def get_patient_appointments(request):
                 {"error": "Only patients can view appointments."},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Appointment',
+            description=f"Patient {request.user.email} viewed their appointments list"
+        )
 
         # Get all appointments for the current user as patient
         appointments = Appointment.objects.filter(
@@ -334,6 +416,16 @@ def mark_patient_available(request, appointment_id):
         appointment.is_patient_available = True
         # Use update_fields to ensure the signal properly detects the change
         appointment.save(update_fields=['is_patient_available'])
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='update',
+            model_name='Appointment',
+            object_id=appointment.id,
+            action_taken_on=appointment.doctor,
+            description=f"Patient {request.user.email} marked themselves as available for appointment with Dr. {appointment.doctor.first_name}"
+        )
 
         return Response({
             'status': 'success',
@@ -393,6 +485,16 @@ def mark_patient_left(request, appointment_id):
         appointment.is_patient_available = False
         appointment.status = 'canceled'
         appointment.save(update_fields=['is_patient_available', 'status'])
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='update',
+            model_name='Appointment',
+            object_id=appointment.id,
+            action_taken_on=appointment.doctor,
+            description=f"Patient {request.user.email} marked themselves as left and canceled appointment with Dr. {appointment.doctor.first_name}"
+        )
 
         # Create notification for doctor
         if appointment.doctor:
@@ -474,6 +576,16 @@ def mark_vitals_taken(request, appointment_id):
         appointment.nurse = request.user
         # Use update_fields to ensure the signal properly detects the change
         appointment.save(update_fields=['is_vitals_taken', 'nurse'])
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='update',
+            model_name='Appointment',
+            object_id=appointment.id,
+            action_taken_on=appointment.patient,
+            description=f"Nurse {request.user.email} marked vitals as taken for patient {appointment.patient.email} in appointment with Dr. {appointment.doctor.first_name}"
+        )
 
         return Response({
             'status': 'success',
@@ -535,6 +647,16 @@ def mark_doctor_with_patient(request, appointment_id):
         appointment.is_doctor_with_patient = True
         # Use update_fields to ensure the signal properly detects the change
         appointment.save(update_fields=['is_doctor_with_patient'])
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='update',
+            model_name='Appointment',
+            object_id=appointment.id,
+            action_taken_on=appointment.patient,
+            description=f"Doctor {request.user.email} marked themselves as with patient {appointment.patient.email}"
+        )
 
         return Response({
             'status': 'success',
@@ -596,6 +718,16 @@ def mark_doctor_done_with_patient(request, appointment_id):
         appointment.is_doctor_done_with_patient = True
         # Use update_fields to ensure the signal properly detects the change
         appointment.save(update_fields=['is_doctor_done_with_patient'])
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='update',
+            model_name='Appointment',
+            object_id=appointment.id,
+            action_taken_on=appointment.patient,
+            description=f"Doctor {request.user.email} marked themselves as done with patient {appointment.patient.email}"
+        )
 
         return Response({
             'status': 'success',
@@ -702,6 +834,16 @@ def create_patient_vital(request):
             # Save with the current user as recorded_by
             vital_sign = serializer.save(recorded_by=request.user)
             
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='create',
+                model_name='VitalSign',
+                object_id=vital_sign.id,
+                action_taken_on=patient,
+                description=f"Nurse {request.user.email} recorded vital signs for patient {patient.email}"
+            )
+            
 # Update appointment's is_vitals_taken field if appointment exists
             if appointment:
                 appointment.is_vitals_taken = True
@@ -788,6 +930,16 @@ def confirm_appointment(request, appointment_id):
         # Update appointment status to confirmed
         appointment.status = 'confirmed'
         appointment.save(update_fields=['status'])
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='update',
+            model_name='Appointment',
+            object_id=appointment.id,
+            action_taken_on=appointment.patient,
+            description=f"Doctor {request.user.email} confirmed appointment for patient {appointment.patient.email} on {appointment.appointment_date}"
+        )
 
         # Create notification for the patient
         notification = Notification.objects.create(
@@ -864,6 +1016,16 @@ def cancel_appointment(request, appointment_id):
         # Update appointment status to cancelled
         appointment.status = 'cancelled'
         appointment.save(update_fields=['status'])
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='update',
+            model_name='Appointment',
+            object_id=appointment.id,
+            action_taken_on=appointment.patient,
+            description=f"Doctor {request.user.email} cancelled appointment for patient {appointment.patient.email}, reason: {cancellation_reason}"
+        )
 
         # Create notification for the patient
         notification = Notification.objects.create(
@@ -942,6 +1104,16 @@ def terminate_appointment(request, appointment_id):
         
         if serializer.is_valid():
             updated_appointment = serializer.save()
+            
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='update',
+                model_name='Appointment',
+                object_id=appointment.id,
+                action_taken_on=appointment.patient,
+                description=f"{request.user.get_full_name()} ({user_role.name}) terminated appointment for patient {appointment.patient.email}, reason: {termination_reason}"
+            )
             
             # Create notification for the patient
             notification = Notification.objects.create(
@@ -1036,6 +1208,16 @@ def update_appointment(request, appointment_id):
         if serializer.is_valid():
             updated_appointment = serializer.save()
             
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='update',
+                model_name='Appointment',
+                object_id=appointment.id,
+                action_taken_on=appointment.patient,
+                description=f"Patient {request.user.email} updated their appointment scheduled for {updated_appointment.appointment_date}"
+            )
+            
             # Automatically change status back to pending when appointment is updated
             if updated_appointment.status != 'pending':
                 updated_appointment.status = 'pending'
@@ -1106,6 +1288,14 @@ def get_patient_vitals(request, patient_id):
     
     try:
         logger.info(f"Fetching vitals for patient ID: {patient_id}")
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='VitalSign',
+            description=f"User {request.user.email} viewed vital signs for patient ID: {patient_id}"
+        )
         
         # Check if patient exists and is actually a patient
         try:
@@ -1192,6 +1382,14 @@ def medical_records_list_create(request):
                     status=status.HTTP_403_FORBIDDEN
                 )
             
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='read',
+                model_name='MedicalRecord',
+                description=f"Doctor/Admin {request.user.email} viewed medical records list"
+            )
+            
             # Get query parameters
             patient_id = request.query_params.get('patient_id')
             
@@ -1239,6 +1437,16 @@ def medical_records_list_create(request):
             if serializer.is_valid():
                 medical_record = serializer.save()
                 
+                # Track user action
+                track_user_action(
+                    user=request.user,
+                    action='create',
+                    model_name='MedicalRecord',
+                    object_id=medical_record.id,
+                    action_taken_on=medical_record.patient,
+                    description=f"Doctor {request.user.email} created medical record for patient {medical_record.patient.email}"
+                )
+                
                 # Update the associated appointment's is_medical_history_recorded field
                 appointment = medical_record.appointment
                 if appointment and not appointment.is_medical_history_recorded:
@@ -1285,9 +1493,17 @@ def get_patient_medical_records(request, patient_id):
         )
         if not is_authorized:
             return Response(
-                {'error': 'You do not have permission to view these medical records'},
+                {'error': 'You are not authorized to view these medical records'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='MedicalRecord',
+            description=f"User {request.user.email} viewed medical records for patient ID: {patient_id}"
+        )
         
         # Get all medical records for the patient, ordered by most recent first
         medical_records = MedicalRecord.objects.filter(
@@ -1366,6 +1582,16 @@ def create_treatment(request, medical_record_id):
             treatment = serializer.save()
             print(f"Treatment created: {treatment.id}")
             
+            # Track user action
+            track_user_action(
+                user=user,
+                action='create',
+                model_name='Treatment',
+                object_id=treatment.id,
+                action_taken_on=medical_record.patient,
+                description=f"Doctor {user.email} prescribed treatment '{treatment.name}' for patient {medical_record.patient.email}"
+            )
+            
             # Create notification for the patient
             try:
                 Notification.objects.create(
@@ -1424,6 +1650,14 @@ def get_medical_record_treatments(request, medical_record_id):
                 {"status": "error", "message": "You don't have permission to view these treatments"},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Treatment',
+            description=f"User {request.user.email} viewed treatments for medical record ID: {medical_record_id}"
+        )
         
         # Get all treatments for the medical record
         treatments = Treatment.objects.filter(medical_record=medical_record).order_by('-date_created')
@@ -1517,6 +1751,16 @@ def create_surgery_placement(request):
             # Save the surgery placement
             surgery_placement = serializer.save()
             
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='create',
+                model_name='SurgeryPlacement',
+                object_id=surgery_placement.id,
+                action_taken_on=medical_record.patient,
+                description=f"Doctor {request.user.email} scheduled surgery for patient {medical_record.patient.email} on {surgery_placement.scheduled_date}"
+            )
+            
             # Update the treatment status to 'in_progress' if it's 'pending'
             if treatment.status == 'pending':
                 treatment.status = 'in_progress'
@@ -1603,6 +1847,17 @@ def admit_patient(request):
         if serializer.is_valid():
             try:
                 admission = serializer.save()
+                
+                # Track user action
+                track_user_action(
+                    user=request.user,
+                    action='create',
+                    model_name='Admission',
+                    object_id=admission.id,
+                    action_taken_on=patient,
+                    description=f"{request.user.role.name.title()} {request.user.email} admitted patient {patient.email} to bed {admission.bed.bed_number}"
+                )
+                
                 return Response(
                     {
                         'status': 'success', 
@@ -1642,6 +1897,14 @@ def get_ward_space_info(request):
     - Available and occupied bed counts
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Ward',
+            description=f"{request.user.role.name.title()} {request.user.email} viewed ward space information"
+        )
+        
         # Get all wards with their related rooms and beds
         wards = Ward.objects.prefetch_related(
             'rooms', 
@@ -1687,9 +1950,17 @@ def list_test_requests(request):
     Get all test requests
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='TestRequest',
+            description=f"{request.user.role.name.title()} {request.user.email} viewed test requests list"
+        )
+        
         # Get all test requests ordered by most recent
         test_requests = TestRequest.objects.all().select_related(
-            'patient', 'requested_by', 'lab_tehnician'
+            'patient', 'requested_by', 'lab_tehnician', 'test_type'
         ).order_by('-created_at')
         
         # Serialize the data
@@ -1718,18 +1989,50 @@ def create_test_request(request):
     """
     serializer = TestRequestSerializer(data=request.data)
     if serializer.is_valid():
-        # Save the test request first
-        test_request = serializer.save(requested_by=request.user)
-        
-        # If there's a medical record associated with this test request,
-        # update its requested_for_test field to True
-        if test_request.medical_record:
-            medical_record = test_request.medical_record
-            medical_record.requested_for_test = True
-            medical_record.save(update_fields=['requested_for_test'])
+        try:
+            # Save the test request first
+            test_request = serializer.save(requested_by=request.user)
             
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors)
+            # Track user action
+            patient_email = test_request.patient.email if test_request.patient else test_request.customers_email or "No patient email"
+            track_user_action(
+                user=request.user,
+                action='create',
+                model_name='TestRequest',
+                object_id=test_request.id,
+                action_taken_on=test_request.patient,
+                description=f"{request.user.role.name.title()} {request.user.email} requested {test_request.test_type.name} test for patient {patient_email}"
+            )
+            
+            # Debug: Log the created test request ID
+            print(f"Created TestRequest with ID: {test_request.id}")
+            
+            # If there's a medical record associated with this test request,
+            # update its requested_for_test field to True
+            if test_request.medical_record:
+                medical_record = test_request.medical_record
+                medical_record.requested_for_test = True
+                medical_record.save(update_fields=['requested_for_test'])
+                
+            return Response({
+                'status': 'success',
+                'message': 'Test request created successfully',
+                'data': serializer.data
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            print(f"Error saving test request: {str(e)}")
+            return Response({
+                'status': 'error',
+                'message': f'Error saving test request: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    print(f"Serializer errors: {serializer.errors}")
+    return Response({
+        'status': 'error',
+        'message': 'Validation failed',
+        'errors': serializer.errors
+    })
 
 
 
@@ -1746,6 +2049,14 @@ def get_patient_users(request):
     """
     try:
         print("Fetching patient users...")
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='User',
+            description=f"{request.user.role.name.title()} {request.user.email} viewed patient users list"
+        )
         
         # Get the patient role group
         from django.contrib.auth.models import Group
@@ -1871,6 +2182,15 @@ def get_patient_user_detail(request, user_id):
                 'admission': admission_data
             }
             
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='read',
+                model_name='User',
+                object_id=patient.id,
+                description=f"{request.user.role.name.title()} {request.user.email} viewed detailed profile for patient {patient.email}"
+            )
+            
             # Return the response in the expected format
             return Response({
                 'status': 'success',
@@ -1974,6 +2294,16 @@ def create_pharmacy_referral(request):
                     referral = serializer.save()
                     print(f"\nPharmacyReferral created successfully with ID: {referral.id}")
                     
+                    # Track user action
+                    track_user_action(
+                        user=request.user,
+                        action='create',
+                        model_name='PharmacyReferral',
+                        object_id=referral.id,
+                        action_taken_on=referral.patient,
+                        description=f"Doctor {request.user.email} created pharmacy referral for patient {referral.patient.email} - {referral.reason}"
+                    )
+                    
                     # Get the updated serializer with all fields
                     response_serializer = PharmacyReferralSerializer(referral)
                     
@@ -2058,6 +2388,16 @@ def create_delivered_medication_treatment(request):
         
         delivered_treatment = serializer.save()
         
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='create',
+            model_name='DeliveredMedicationTreatment',
+            object_id=delivered_treatment.id,
+            action_taken_on=delivered_treatment.treatment.medical_record.patient if delivered_treatment.treatment and delivered_treatment.treatment.medical_record else None,
+            description=f"Doctor {request.user.email} recorded delivered medication treatment for {delivered_treatment.drug.name}"
+        )
+        
         return Response({
             'status': 'success',
             'message': 'Delivered medication treatment created successfully',
@@ -2088,6 +2428,14 @@ def get_delivered_medications_for_treatment(request, treatment_id):
     - Only requires authentication, no additional permission checks
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='DeliveredMedicationTreatment',
+            description=f"{request.user.role.name.title()} {request.user.email} viewed delivered medications for treatment ID: {treatment_id}"
+        )
+        
         # Get all delivered treatments for this treatment
         delivered_treatments = DeliveredMedicationTreatment.objects.filter(
             treatment_id=treatment_id
@@ -2125,6 +2473,19 @@ def get_delivered_medications_for_treatment(request, treatment_id):
 @authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
 def get_delivered_medication_treatments(request):
+    """
+    Get delivered medication treatments based on user role
+    - Doctors can see all records
+    - Patients can only see their own records
+    """
+    # Track user action
+    track_user_action(
+        user=request.user,
+        action='read',
+        model_name='DeliveredMedicationTreatment',
+        description=f"{request.user.role.name.title()} {request.user.email} viewed delivered medication treatments list"
+    )
+    
     # For doctors, show all records (or filter by patient if needed)
     if hasattr(request.user, 'role') and request.user.role.name == 'doctor':
         queryset = DeliveredMedicationTreatment.objects.all()
@@ -2185,6 +2546,16 @@ def delete_delivered_treatment(request, treatment_id):
         #         'message': 'You do not have permission to delete this treatment'
         #     }, status=status.HTTP_403_FORBIDDEN)
         
+        # Track user action before deletion
+        track_user_action(
+            user=request.user,
+            action='delete',
+            model_name='DeliveredMedicationTreatment',
+            object_id=treatment.id,
+            action_taken_on=treatment.treatment.medical_record.patient if treatment.treatment and treatment.treatment.medical_record else None,
+            description=f"{request.user.role.name.title()} {request.user.email} deleted delivered medication treatment for {treatment.drug.name}"
+        )
+        
         treatment.delete()
         
         return Response({
@@ -2215,6 +2586,14 @@ def get_drugs(request):
     """
     Get all drugs
     """
+    # Track user action
+    track_user_action(
+        user=request.user,
+        action='read',
+        model_name='Drug',
+        description=f"{request.user.role.name.title()} {request.user.email} viewed drugs list"
+    )
+    
     drugs = Drug.objects.all()
     serializer = DrugSerializer(drugs, many=True)
     return Response({
@@ -2239,6 +2618,14 @@ def get_patient_treatment_history(request, patient_id):
     try:
         # Get the patient
         patient = get_object_or_404(get_user_model(), id=patient_id, role__name='patient')
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='MedicalRecord',
+            description=f"{request.user.role.name.title()} {request.user.email} viewed treatment history for patient {patient.email}"
+        )
         
         # Get all medical records for the patient using patient_id
         medical_records = MedicalRecord.objects.filter(
@@ -2280,6 +2667,17 @@ def create_doctor_visit(request):
     
     if serializer.is_valid():
         visit = serializer.save()
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='create',
+            model_name='DoctorVisit',
+            object_id=visit.id,
+            action_taken_on=visit.patient,
+            description=f"Doctor {request.user.email} recorded doctor visit for patient {visit.patient.email} - {visit.observation[:50] if visit.observation else 'No observation'}"
+        )
+        
         return Response({
             'status': 'success',
             'message': 'Doctor visit created successfully',
@@ -2307,7 +2705,18 @@ def create_doctor_visit(request):
 @authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
 def get_doctor_visits_for_treatment(request, treatment_id):
+    """
+    Get all doctor visits for a specific treatment
+    """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='DoctorVisit',
+            description=f"{request.user.role.name.title()} {request.user.email} viewed doctor visits for treatment ID: {treatment_id}"
+        )
+        
         # Verify the treatment exists
         treatment = DeliveredMedicationTreatment.objects.get(id=treatment_id)
         
@@ -2345,6 +2754,14 @@ def get_my_medications(request):
     - Includes treatment details and status
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Treatment',
+            description=f"{request.user.role.name.title()} {request.user.email} viewed their medications list"
+        )
+        
         # Get all treatments
         treatments = Treatment.objects.all()
         
@@ -2378,6 +2795,14 @@ def get_who_administered_for_treatment(request, delivered_medication_treatment_i
     - Only requires authentication
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='who_administered',
+            description=f"{request.user.role.name.title()} {request.user.email} viewed administration records for treatment ID: {delivered_medication_treatment_id}"
+        )
+        
         # Get all who_administered records with related user data
         who_administered_list = who_administered.objects.filter(
             delivered_medication_treatment_id=delivered_medication_treatment_id
@@ -2428,6 +2853,14 @@ def get_pharmacy_referrals(request):
     """
     Get all pharmacy referrals
     """
+    # Track user action
+    track_user_action(
+        user=request.user,
+        action='read',
+        model_name='PharmacyReferral',
+        description=f"{request.user.role.name.title()} {request.user.email} viewed pharmacy referrals list"
+    )
+    
     referrals = PharmacyReferral.objects.all().prefetch_related(
         'referral_dispensed_items__drug'
     )
@@ -2473,7 +2906,17 @@ def confirm_drug_dispense(request, referral_id):
         )
         
         if serializer.is_valid():
-            serializer.save()
+            updated_referral = serializer.save()
+            
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='update',
+                model_name='PharmacyReferral',
+                object_id=referral.id,
+                description=f"Pharmacy staff {request.user.email} confirmed drug dispensation for referral {referral_id}"
+            )
+            
             return Response({
                 'status': 'success',
                 'message': 'Drug dispensation confirmed successfully',
@@ -2513,6 +2956,15 @@ def generate_bulk_sale_id(request):
         bulk_sale = BulkSaleId.objects.create(staff=request.user)
         print(f"Created BulkSaleId: {bulk_sale.id}")  # Debug: Print created ID
         
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='create',
+            model_name='BulkSaleId',
+            object_id=bulk_sale.id,
+            description=f"Pharmacy staff {request.user.email} generated bulk sale ID {bulk_sale.bulk_id}"
+        )
+        
         # Serialize the response
         serializer = BulkSaleIdSerializer(bulk_sale)
         
@@ -2540,6 +2992,14 @@ def get_user_bulk_sale_ids(request):
     Get all valid BulkSaleId records created by the authenticated user
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='BulkSaleId',
+            description=f"Pharmacy staff {request.user.email} viewed their bulk sale IDs list"
+        )
+        
         # Get all valid bulk sale IDs for the current user
         bulk_sale_ids = BulkSaleId.objects.filter(
             staff=request.user,
@@ -2616,6 +3076,15 @@ def create_bulk_dispensed_items(request):
                 )
                 item.full_clean()  # Validate the model before saving
                 item.save()
+                
+                # Track user action for each item created
+                track_user_action(
+                    user=request.user,
+                    action='create',
+                    model_name='ReferralDispensedDrugItem',
+                    object_id=item.id,
+                    description=f"Pharmacy staff {request.user.email} added {item.number_of_cards} cards of {drug.name} to bulk sale {bulk_sale.bulk_id}"
+                )
                 
                 created_items.append({
                     'id': item.id,
@@ -2705,6 +3174,16 @@ def create_drug_sale(request):
         if is_valid:
             drug_sale = serializer.save()
             print(f"Created DrugSale: {drug_sale.id}")
+            
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='create',
+                model_name='DrugSale',
+                object_id=drug_sale.id,
+                description=f"Pharmacy staff {request.user.email} created drug sale for {drug_sale.customer_name}, amount: {drug_sale.total_amount}"
+            )
+            
             return Response({
                 'status': 'success',
                 'message': 'Drug sale created successfully',
@@ -2745,6 +3224,14 @@ def list_drug_sales(request):
     Get all DrugSale records
     """
     try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='DrugSale',
+            description=f"Pharmacy staff {request.user.email} viewed drug sales list"
+        )
+        
         drug_sales = DrugSale.objects.all()
         serializer = DrugSaleListSerializer(drug_sales, many=True)
         return Response({
@@ -2824,17 +3311,32 @@ def update_drug_sale_payment(request, pk):
             
             # Create Income record for the drug sale payment
             try:
+                # Extract payment method name from PaymentMethod object
+                payment_method_obj = serializer.validated_data.get('payment_method')
+                payment_method = 'cash'  # default
+                if payment_method_obj and hasattr(payment_method_obj, 'name'):
+                    payment_method = payment_method_obj.name.lower()
+                
                 Income.objects.create(
                     reason=f'Drug Sale - {drug_sale.id}',
                     handled_by=request.user,
                     received_from=drug_sale.customer_name or 'Walk-in Customer',
-                    payment_method=serializer.validated_data.get('payment_method', 'cash'),
+                    payment_method=payment_method,
                     amount=float(serializer.validated_data['amount_paid']),
                     description=f'Payment for drug sale ID: {drug_sale.id}'
                 )
             except Exception as e:
                 # Log the error but don't fail the request
                 print(f"Error creating income record: {str(e)}")
+            
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='update',
+                model_name='DrugSale',
+                object_id=drug_sale.id,
+                description=f"Accountant {request.user.email} updated payment for drug sale {drug_sale.id}, amount paid: {serializer.validated_data['amount_paid']}"
+            )
             
             return Response({
                 'status': 'success',
@@ -2903,8 +3405,11 @@ def update_test_request_payment(request, pk):
         if hasattr(test_request, "test") and test_request.test and hasattr(test_request.test, "name"):
             test_name = str(test_request.test.name)
         
-        # Get payment method safely
-        payment_method = getattr(test_request, 'payment_method', 'cash')
+        # Get payment method safely - extract name from PaymentMethod object
+        payment_method_obj = getattr(test_request, 'payment_method', None)
+        payment_method = 'cash'  # default
+        if payment_method_obj and hasattr(payment_method_obj, 'name'):
+            payment_method = payment_method_obj.name.lower()
         
         # Create Income record for the test payment
         Income.objects.create(
@@ -2964,17 +3469,33 @@ def update_pharmacy_referral_payment(request, referral_id):
         if serializer.is_valid():
             referral = serializer.save()
             
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='update',
+                model_name='PharmacyReferral',
+                object_id=referral.id,
+                description=f"Accountant {request.user.email} updated payment for pharmacy referral {referral_id}, amount: {referral.amount_paid}"
+            )
+            
             # Safely get patient email
             patient_email = "patient@example.com"
             if hasattr(referral, "patient") and referral.patient:
                 patient_email = getattr(referral.patient, 'email', 'patient@example.com')
             
             # Create Income record
+            payment_method_str = 'cash'  # default
+            if referral.payment_method:
+                payment_method_str = referral.payment_method.name.lower() if referral.payment_method.name else 'cash'
+                # Map to valid Income payment_method choices
+                if payment_method_str not in ['cash', 'card', 'bank', 'insurance', 'other']:
+                    payment_method_str = 'other'
+            
             Income.objects.create(
                 reason=f'Pharmacy Referral Payment - {referral_id}',
                 handled_by=request.user,
                 received_from=patient_email,
-                payment_method=referral.mode_of_payment,
+                payment_method=payment_method_str,
                 amount=float(referral.amount_paid or 0),
                 description=f'Payment for pharmacy referral. Patient: {patient_email}'
             )
@@ -3012,6 +3533,14 @@ def get_patient_admission_charges(request, patient_email):
     try:
         # Try to find the patient by email
         patient = APPLICATIONS_USER_MODEL.objects.get(email=patient_email, role__name='patient')
+        
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='Admission',
+            description=f"{request.user.role.name.title()} {request.user.email} viewed admission charges for patient {patient_email}"
+        )
         
         # Get all admissions for the patient
         admissions = Admission.objects.filter(patient=patient).select_related('bed').prefetch_related('charges')
@@ -3088,6 +3617,17 @@ def create_admission_charge(request):
             # Save the charge
             charge = serializer.save()
             print(f"DEBUG: Successfully created charge: {charge.id}")
+            
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='create',
+                model_name='AdmissionCharge',
+                object_id=charge.id,
+                action_taken_on=charge.admission.patient if charge.admission else None,
+                description=f"{request.user.role.name.title()} {request.user.email} created admission charge of {charge.amount} for patient {charge.admission.patient.email if charge.admission and charge.admission.patient else 'Unknown'}"
+            )
+            
             return Response({
                 'status': 'success',
                 'message': 'Admission charge created successfully',
@@ -3136,7 +3676,18 @@ def update_admission_charge(request, charge_id):
         )
         
         if serializer.is_valid():
-            serializer.save()
+            updated_charge = serializer.save()
+            
+            # Track user action
+            track_user_action(
+                user=request.user,
+                action='update',
+                model_name='AdmissionCharge',
+                object_id=charge.id,
+                action_taken_on=charge.admission.patient if charge.admission else None,
+                description=f"{request.user.role.name.title()} {request.user.email} updated admission charge for patient {charge.admission.patient.email if charge.admission and charge.admission.patient else 'Unknown'}"
+            )
+            
             return Response({
                 'status': 'success',
                 'message': 'Charge updated successfully',
@@ -3170,6 +3721,14 @@ def get_drugs(request):
     """
     Get all drugs
     """
+    # Track user action
+    track_user_action(
+        user=request.user,
+        action='read',
+        model_name='Drug',
+        description=f"{request.user.role.name.title()} {request.user.email} viewed drugs list"
+    )
+    
     drugs = Drug.objects.all()
     serializer = DrugSerializer(drugs, many=True)
     return Response({
@@ -3182,3 +3741,167 @@ def get_drugs(request):
 
 
 
+
+
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def ai_chat(request):
+    """
+    AI Chat endpoint using OpenAI API
+    Required fields: message
+    Optional fields: conversation_history (list of previous messages)
+    """
+    try:
+        # Track user action
+        track_user_action(
+            user=request.user,
+            action='read',
+            model_name='AI',
+            description=f"{request.user.role.name.title()} {request.user.email} accessed AI chat"
+        )
+        
+        # Validate request data
+        serializer = ChatRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'status': 'error',
+                'message': 'Invalid request data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        message = serializer.validated_data['message']
+        conversation_history = serializer.validated_data.get('conversation_history', [])
+
+        # Configure OpenAI
+        try:
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        except Exception as e:
+            return Response({
+                'status': 'error',
+                'message': 'Failed to initialize OpenAI client',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Prepare messages for OpenAI
+        messages = [
+            {"role": "system", "content": "You are a helpful AI assistant for a hospital management system. Provide helpful, accurate, and professional responses related to healthcare, hospital services, and medical inquiries."}
+        ]
+
+        # Add conversation history if provided
+        if conversation_history:
+            messages.extend(conversation_history)
+
+        # Add current message
+        messages.append({"role": "user", "content": message})
+
+        # Make OpenAI API call
+        try:
+            # Try the newer responses API first
+            try:
+                response = client.responses.create(
+                    model="gpt-4o-mini",  # Use a more common model than gpt-5-nano
+                    input=message,
+                    store=True,
+                )
+                ai_response = response.output_text
+            except AttributeError:
+                # Fall back to the standard chat completions API
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=messages,
+                    max_tokens=1000,
+                    temperature=0.7
+                )
+                ai_response = response.choices[0].message.content
+        except Exception as e:
+            return Response({
+                'status': 'error',
+                'message': 'OpenAI API call failed',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Generate conversation ID
+        conversation_id = str(uuid.uuid4())
+
+        # Return response
+        response_serializer = ChatResponseSerializer({
+            'response': ai_response,
+            'conversation_id': conversation_id
+        })
+
+        return Response({
+            'status': 'success',
+            'data': response_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': 'Internal server error',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_test_types(request):
+    """
+    Get all test types available
+    Returns a list of all test types with their IDs, names, descriptions, and prices
+    """
+    try:
+        test_types = TestTypes.objects.all().order_by('name')
+        serializer = TestTypesSerializer(test_types, many=True)
+        
+        response_data = {
+            'status': 'success',
+            'count': test_types.count(),
+            'test_types': serializer.data
+        }
+        
+        # Debug: Print the response being sent
+        print(f"Test Types API Response: {response_data}")
+        print(f"Number of test types returned: {len(response_data['test_types'])}")
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_payment_methods(request):
+    """
+    Get all payment methods available
+    Returns a list of all payment methods with their IDs, names, account numbers, banks, and account names
+    """
+    try:
+        payment_methods = PaymentMethod.objects.all().order_by('name')
+        serializer = PaymentMethodSerializer(payment_methods, many=True)
+        
+        response_data = {
+            'status': 'success',
+            'count': payment_methods.count(),
+            'payment_methods': serializer.data
+        }
+        
+        # Debug: Print the response being sent
+        print(f"Payment Methods API Response: {response_data}")
+        print(f"Number of payment methods returned: {len(response_data['payment_methods'])}")
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

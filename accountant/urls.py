@@ -4,6 +4,7 @@ from .views import *
 
 
 urlpatterns = [
+    path('activities', get_all_activities),
     path('incomes', income_list),
     path('expenses', expense_list),
     path('create-expenses', create_expense),

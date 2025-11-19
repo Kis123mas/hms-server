@@ -98,4 +98,6 @@ urlpatterns = [
     path('patient-admission-charges/<str:patient_email>', get_patient_admission_charges),
     path('admission-charges', create_admission_charge),
     path('admission-charges/<int:charge_id>', update_admission_charge),
+    path('test-types', get_test_types),
+    path('payment-methods', get_payment_methods),
 ]
